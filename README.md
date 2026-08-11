@@ -5,7 +5,7 @@ Zero-token AI gateway. Sits between OpenClaw (or any OpenAI-compatible client) a
 - **Cache hit** → executes locally, 0 tokens
 - **Cache miss** → calls LLM, learns result, next time is 0 tokens
 - **Device actions** → executes via ADB + Termux API (Android), shell (desktop)
-- **Built-in chat UI** at `/ui` — no OpenClaw required
+- **Built-in chat UI** at `/ui`, no OpenClaw required
 
 ---
 
@@ -47,17 +47,17 @@ Add to `~/.openclaw/openclaw.json` under `models.providers`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TF_PLATFORM` | auto-detected | `android`, `ios`, `linux`, `macos`, `windows` |
-| `TF_LLM_BASE_URL` | — | LLM API base URL |
-| `TF_LLM_API_KEY` | — | LLM API key |
-| `TF_LLM_MODEL` | — | Model name |
-| `TF_LLM_FALLBACKS` | — | `url\|key\|model;url\|key\|model` |
+| `TF_LLM_BASE_URL` | - | LLM API base URL |
+| `TF_LLM_API_KEY` | - | LLM API key |
+| `TF_LLM_MODEL` | - | Model name |
+| `TF_LLM_FALLBACKS` | - | `url\|key\|model;url\|key\|model` |
 | `TF_HOST` | `127.0.0.1` | Server bind host |
 | `TF_PORT` | `8000` | Server port |
 | `TF_FUZZY_THRESHOLD` | `0.45` | Fuzzy match sensitivity |
 | `TF_STALE_DAYS` | `30` | Days before cached entries expire |
 | `TF_DISABLE_ADB` | `false` | Disable ADB entirely |
 | `TF_DISABLE_TERMUX` | `false` | Disable Termux API |
-| `TF_DISABLE_ACTIONS` | — | Comma-separated blocked action types |
+| `TF_DISABLE_ACTIONS` | - | Comma-separated blocked action types |
 
 ---
 
