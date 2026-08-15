@@ -1,13 +1,13 @@
 # Token Firewall v3
 
-Zero-token AI gateway. Sits between OpenClaw (or any OpenAI-compatible client) and your LLM.
+Zero-token AI gateway. Sits between any OpenAI-compatible client and your LLM.
 
 - **Cache hit** → executes locally, 0 tokens
 - **Cache miss** → calls LLM, learns result, next time is 0 tokens
 - **Semantic cache** → paraphrased repeats ("check battery" vs "what's my battery at") still hit cache, not just exact text matches
 - **Device actions** → executes via ADB + Termux API (Android), rish/Shizuku over SSH (remote Android, no ADB needed), or shell (desktop)
 - **Desktop + phone together** → on Linux/macOS/Windows, `CompositeHands` runs desktop shell control and remote-phone rish control side by side, so one TF instance can drive both
-- **Built-in chat UI** at `/ui`, no OpenClaw required
+- **Built-in chat UI** at `/ui`, no extra client needed to try it out
 
 ---
 
@@ -55,18 +55,19 @@ nano ~/.token-firewall.env
 cd ~/token-firewall-v3 && python launch.py
 ```
 
-## OpenClaw config
+## Using it from any client
 
-Add to `~/.openclaw/openclaw.json` under `models.providers`:
+Token Firewall speaks the standard OpenAI API, so anything that lets you
+point at a custom base URL works out of the box, no adapter needed:
 
-```json
-"token-firewall": {
-  "baseUrl": "http://127.0.0.1:8000/v1",
-  "apiKey": "none",
-  "api": "openai-completions",
-  "models": [{"id": "firewall", "name": "Token Firewall", "input": ["text"]}]
-}
 ```
+Base URL: http://127.0.0.1:8000/v1
+API key:  none (or anything, it's not checked)
+Model:    firewall
+```
+
+That's it. Point any OpenAI-compatible app, SDK, or CLI at that base URL
+and it'll route through the cache automatically.
 
 ---
 
@@ -106,7 +107,7 @@ Add to `~/.openclaw/openclaw.json` under `models.providers`:
 ## Architecture
 
 ```
-client (OpenClaw / built-in UI / curl)
+client (any OpenAI-compatible app / built-in UI / curl)
     │
     ▼
 server.py  (FastAPI, async, SSE)

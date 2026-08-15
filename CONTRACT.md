@@ -4,7 +4,7 @@ This document describes the external HTTP contracts for **Token Firewall v3**.
 
 Token Firewall is an OpenAI-compatible gateway that can also execute device
 actions via platform "hands" (Android, desktop, etc.). It sits between a
-client (OpenClaw, CLI, custom apps) and one or more upstream LLM providers.
+client (any OpenAI-compatible app, CLI, custom apps) and one or more upstream LLM providers.
 
 ---
 

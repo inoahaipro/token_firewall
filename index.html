@@ -159,7 +159,7 @@
         answer or plan does it call your underlying LLM.
       </p>
       <div class="arch">
-client (OpenClaw / CLI / web UI)
+client (any OpenAI-compatible app / CLI / web UI)
     │
     ▼
 server.py  (FastAPI · SSE · /v1/chat/completions)
@@ -197,7 +197,7 @@ FirewallRouter
           <button class="qs-tab active" data-tab="android">01 · Android / Termux</button>
           <button class="qs-tab" data-tab="desktop">02 · Desktop</button>
           <button class="qs-tab" data-tab="remote">03 · Desktop + Remote Phone</button>
-          <button class="qs-tab" data-tab="openclaw">04 · OpenClaw</button>
+          <button class="qs-tab" data-tab="anyclient">04 · Any Client</button>
         </div>
         <div>
           <div class="qs-pane active" id="pane-android">
@@ -257,23 +257,17 @@ python launch.py
 # CompositeHands loads DesktopHands + RishPhoneHands together:
 # one instance, both surfaces.</pre>
           </div>
-          <div class="qs-pane" id="pane-openclaw">
-            <pre class="code"># Add Token Firewall as a provider in ~/.openclaw/openclaw.json
-"models": {
-  "providers": {
-    "token-firewall": {
-      "baseUrl": "http://127.0.0.1:8000/v1",
-      "apiKey": "none",
-      "api": "openai-completions",
-      "models": [
-        { "id": "firewall", "name": "Token Firewall", "input": ["text"] }
-      ]
-    }
-  }
-}
+          <div class="qs-pane" id="pane-anyclient">
+            <pre class="code"># Token Firewall speaks the standard OpenAI API, so any
+# OpenAI-compatible app, SDK, or CLI works with no adapter:
 
-# Then pick it as your model in OpenClaw and chat as usual.
-# Cache hits will stay local, misses will go out to your LLM.
+Base URL: http://127.0.0.1:8000/v1
+API key:  none (or anything, it's not checked)
+Model:    firewall
+
+# Point your client's custom-provider settings at that base URL
+# and chat as usual. Cache hits stay local at 0 tokens, misses
+# go out to your configured LLM and get learned for next time.
 </pre>
           </div>
         </div>
