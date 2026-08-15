@@ -1,5 +1,5 @@
 """
-core/cache/store.py — Two-tier knowledge cache.
+core/cache/store.py -- Two-tier knowledge cache.
 
 Tier 1: knowledge packs (static JSON, loaded at startup, platform-matched)
 Tier 2: learned.db (SQLite, written from LLM + execution results)
@@ -189,12 +189,12 @@ class KnowledgeStore:
 
     def lookup(self, fp: str) -> Optional[CacheEntry]:
         """Exact fingerprint lookup. Tier 1 then Tier 2."""
-        # Tier 1 — packs
+        # Tier 1 -- packs
         for entry in self._packs:
             if entry.fingerprint == fp:
                 return entry
 
-        # Tier 2 — learned
+        # Tier 2 -- learned
         row = self._db.execute(
             "SELECT * FROM learned WHERE fingerprint = ?", (fp,)
         ).fetchone()

@@ -1,5 +1,5 @@
 """
-core/config.py — Single source of truth. Zero hardcoding.
+core/config.py -- Single source of truth. Zero hardcoding.
 Every setting overridable via environment variable.
 """
 import os
@@ -111,8 +111,8 @@ Available action types:
 
 Rules:
 - Only return JSON for DEVICE ACTIONS.
-- Questions, chat, creative writing — plain text only, no JSON.
-- When unsure — use plain text.
+- Questions, chat, creative writing -- plain text only, no JSON.
+- When unsure -- use plain text.
 - Keep responses concise.
 """.strip())
 

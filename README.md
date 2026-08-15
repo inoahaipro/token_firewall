@@ -39,7 +39,7 @@ connection, no phone unlocked on a desk.
 # 1. Install deps
 pip install fastapi 'uvicorn[standard]' --break-system-packages
 
-# 2. Configure — needs TF_PLATFORM=linux (or macos/windows) so
+# 2. Configure. Needs TF_PLATFORM=linux (or macos/windows) so
 #    CompositeHands loads both DesktopHands and RishPhoneHands
 nano ~/.token-firewall.env
 # TF_PLATFORM=linux

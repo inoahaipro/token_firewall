@@ -1,5 +1,5 @@
 """
-server.py — Token Firewall v3
+server.py: Token Firewall v3
 FastAPI async server. OpenAI-compatible API + built-in chat UI.
 
 Fixes vs previous:
@@ -255,7 +255,7 @@ async def health():
 async def models():
     return {"object":"list","data":[{
         "id":"token-firewall","object":"model","created":_start_time,
-        "description":"Token Firewall v3 — zero-token cached device gateway",
+        "description":"Token Firewall v3: zero-token cached device gateway",
     }]}
 
 
@@ -476,7 +476,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#e4
   <span id="hstats">loading…</span>
 </div>
 <div id="msgs">
-  <div class="bubble bot"><div class="msg">Ready — ask anything or give a device command.</div></div>
+  <div class="bubble bot"><div class="msg">Ready. Ask anything or give a device command.</div></div>
 </div>
 <form id="form">
   <textarea id="inp" rows="1" placeholder="Message or command…"></textarea>
@@ -530,7 +530,7 @@ async function fetchStats(){
   try{
     const d=await fetch('/health').then(r=>r.json());
     const ro=d.router||{};
-    hstats.textContent=`⚡${ro.cache_hits||0} hits · 🧠${ro.tokens_spent||0} tokens · ${ro.hit_rate||'—'}`;
+    hstats.textContent=`⚡${ro.cache_hits||0} hits · 🧠${ro.tokens_spent||0} tokens · ${ro.hit_rate||'-'}`;
   }catch{}
 }
 
@@ -593,7 +593,7 @@ async def ui():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print(f"\n  Token Firewall v3 — {cfg.PLATFORM}")
+    print(f"\n  Token Firewall v3: {cfg.PLATFORM}")
     print(f"  API    : http://{cfg.HOST}:{cfg.PORT}/v1/chat/completions")
     print(f"  UI     : http://{cfg.HOST}:{cfg.PORT}/ui")
     print(f"  Health : http://{cfg.HOST}:{cfg.PORT}/health")

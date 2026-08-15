@@ -1,5 +1,5 @@
 """
-core/dispatch/router.py — FirewallRouter v3
+core/dispatch/router.py -- FirewallRouter v3
 
 Flow per request:
   1. IntentEngine classifies prompt → Intent
@@ -123,15 +123,15 @@ def _extract_action(text: str) -> Optional[dict]:
 
 def _confirm(atype: str) -> str:
     return {
-        "vibrate":"Done — vibrated.","torch":"Done — flashlight toggled.",
-        "take_photo":"Done — photo taken.","send_sms":"Done — SMS sent.",
-        "open_app":"Done — app opened.","close_app":"Done — app closed.",
-        "key_event":"Done.","tap":"Done — tapped.","long_press":"Done — long pressed.",
-        "swipe":"Done — swiped.","scroll_up":"Done — scrolled up.",
-        "scroll_down":"Done — scrolled down.","type_text":"Done — typed.",
-        "screenshot_adb":"Done — screenshot saved.","clipboard_set":"Done — copied.",
-        "find_and_tap":"Done — tapped element.","find_and_type":"Done — typed into field.",
-        "find_and_scroll":"Done — scrolled.","adb_command":"Done.","wait":"Done — waited.",
+        "vibrate":"Done -- vibrated.","torch":"Done -- flashlight toggled.",
+        "take_photo":"Done -- photo taken.","send_sms":"Done -- SMS sent.",
+        "open_app":"Done -- app opened.","close_app":"Done -- app closed.",
+        "key_event":"Done.","tap":"Done -- tapped.","long_press":"Done -- long pressed.",
+        "swipe":"Done -- swiped.","scroll_up":"Done -- scrolled up.",
+        "scroll_down":"Done -- scrolled down.","type_text":"Done -- typed.",
+        "screenshot_adb":"Done -- screenshot saved.","clipboard_set":"Done -- copied.",
+        "find_and_tap":"Done -- tapped element.","find_and_type":"Done -- typed into field.",
+        "find_and_scroll":"Done -- scrolled.","adb_command":"Done.","wait":"Done -- waited.",
         "run_command":"Done.",
     }.get(atype, "Done.")
 
@@ -146,9 +146,9 @@ def _format(atype: str, raw: str) -> str:
         plugged = d.get("plugged","").replace("PLUGGED_","").title()
         plug = f" ({plugged})" if plugged else ""
         tail = f"Health: {health}, Temp: {temp}°C"
-        if status == "full": return f"Battery {pct}% — fully charged{plug}. {tail}"
-        elif status == "charging": return f"Battery {pct}% — charging{plug}. {tail}"
-        else: return f"Battery {pct}% — discharging. {tail}"
+        if status == "full": return f"Battery {pct}% -- fully charged{plug}. {tail}"
+        elif status == "charging": return f"Battery {pct}% -- charging{plug}. {tail}"
+        else: return f"Battery {pct}% -- discharging. {tail}"
     if atype == "wifi_info":
         return f"WiFi: {d.get('ssid','?')} · IP: {d.get('ip','?')} · {d.get('link_speed_mbps','?')} Mbps"
     if atype == "location":
@@ -347,7 +347,7 @@ class FirewallRouter:
         if action:
             print(f"[LLM→ACTION] type={action.get('type')}")
             return self._exec_llm_action(action, intent, tokens)
-        # Cache plain text — but not app+typing-verb prompts
+        # Cache plain text -- but not app+typing-verb prompts
         norm = intent.normalized
         if intent.cacheable and not (
             any(app in norm for app in _APP_TYPING_APPS) and

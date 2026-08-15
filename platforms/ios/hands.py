@@ -1,7 +1,7 @@
 """
 hands_impl/ios/ios_hands.py
 
-iOS Hands — executes actions via:
+iOS Hands -- executes actions via:
   - Apple Shortcuts URL schemes  (shortcuts://run-shortcut?name=...)
   - a-Shell commands             (if running inside a-Shell)
   - Pythonista appex APIs        (if running inside Pythonista)
@@ -144,7 +144,7 @@ class IOSHands(BaseHands):
                 return ActionResult(success=True, output=f"Opened: {url}")
             except Exception as e:
                 return ActionResult(success=False, error=str(e))
-        # Fallback — try subprocess open
+        # Fallback -- try subprocess open
         return self._shell(f"open '{url}'")
 
     # ── Shell (a-Shell only) ──────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 """
-platforms/android/resolver.py — Auto-discover installed app package names.
+platforms/android/resolver.py -- Auto-discover installed app package names.
 
 Runs once at startup. Maps friendly names to actual installed packages.
 Handles OEM variants (Samsung vs Pixel vs OnePlus vs Xiaomi etc.)

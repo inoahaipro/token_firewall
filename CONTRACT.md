@@ -1,14 +1,14 @@
-# CONTRACT.md — Token Firewall v3 interface spec
+# CONTRACT.md: Token Firewall v3 interface spec
 
 This document describes the external HTTP contracts for **Token Firewall v3**.
 
-Token Firewall is an OpenAI‑compatible gateway that can also execute device
+Token Firewall is an OpenAI-compatible gateway that can also execute device
 actions via platform "hands" (Android, desktop, etc.). It sits between a
 client (OpenClaw, CLI, custom apps) and one or more upstream LLM providers.
 
 ---
 
-## 1) OpenAI‑compatible HTTP API
+## 1) OpenAI-compatible HTTP API
 
 Base URL (default):
 
@@ -19,7 +19,7 @@ http://127.0.0.1:8000
 ### 1.1 `/v1/chat/completions` (POST)
 
 OpenAI chat completions interface. Token Firewall accepts the usual OpenAI
-fields and adds some optional, firewall‑specific metadata in the response.
+fields and adds some optional, firewall-specific metadata in the response.
 
 **Request (minimal example):**
 
@@ -78,7 +78,7 @@ Authorization: Bearer none
 
 Notes:
 
-- The top‑level shape matches OpenAI chat completions so existing clients can
+- The top-level shape matches OpenAI chat completions so existing clients can
   usually drop Token Firewall in without changes.
 - The extra `firewall` object is optional and may be omitted in minimal modes.
 - `tokens_upstream` reflects what the **upstream LLM** used on a miss; it is
@@ -124,7 +124,7 @@ GET /v1/models HTTP/1.1
       "object": "model",
       "owned_by": "token-firewall",
       "metadata": {
-        "description": "Zero‑token gateway over one or more upstream LLMs"
+        "description": "Zero-token gateway over one or more upstream LLMs"
       }
     }
   ]
@@ -281,15 +281,15 @@ The exact shape is internal and may evolve, but the contract is:
 
 Key environment variables (see README for full list):
 
-- `TF_PLATFORM` — auto‑detected platform override (`android`, `linux`, etc.)
-- `TF_LLM_BASE_URL` — upstream LLM base URL
-- `TF_LLM_API_KEY` — upstream LLM API key
-- `TF_LLM_MODEL` — primary upstream model
-- `TF_LLM_FALLBACKS` — semicolon‑separated fallback chain
-- `TF_HOST`, `TF_PORT` — bind host/port
-- `TF_FUZZY_THRESHOLD` — cache similarity threshold
-- `TF_STALE_DAYS` — days before learned entries expire
-- `TF_DISABLE_ADB`, `TF_DISABLE_TERMUX`, `TF_DISABLE_ACTIONS` — safety toggles
+- `TF_PLATFORM` -- auto-detected platform override (`android`, `linux`, etc.)
+- `TF_LLM_BASE_URL` -- upstream LLM base URL
+- `TF_LLM_API_KEY` -- upstream LLM API key
+- `TF_LLM_MODEL` -- primary upstream model
+- `TF_LLM_FALLBACKS` -- semicolon-separated fallback chain
+- `TF_HOST`, `TF_PORT` -- bind host/port
+- `TF_FUZZY_THRESHOLD` -- cache similarity threshold
+- `TF_STALE_DAYS` -- days before learned entries expire
+- `TF_DISABLE_ADB`, `TF_DISABLE_TERMUX`, `TF_DISABLE_ACTIONS` -- safety toggles
 
 These are considered part of the public configuration contract for v3.
 

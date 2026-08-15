@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Token Firewall — zero‑token AI gateway</title>
+  <title>Token Firewall: zero-token AI gateway</title>
   <meta name="description" content="Token Firewall sits between your client and your LLM. Cache hits are 0 tokens, cache misses teach it new skills. Semantic caching catches paraphrased repeats. Device hands for Android (ADB or remote rish/Shizuku) and desktop." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -93,15 +93,15 @@
 
   <section class="hero">
     <div class="hero-left">
-      <div class="hero-tag">token firewall · v3 · zero‑token gateway</div>
+      <div class="hero-tag">token firewall · v3 · zero-token gateway</div>
       <h1>teach the model once.<br/><em>replay for free.</em></h1>
       <p class="hero-sub">
         Token Firewall sits between your client and your LLM. Cache hits are
-        <strong>0 tokens</strong>, cache misses teach it new skills — including
+        <strong>0 tokens</strong>, cache misses teach it new skills, including
         <strong>semantic matches</strong>, so paraphrased repeats still hit cache.
         It can also execute real <strong>device actions</strong> via Android
-        (ADB, or remote rish/Shizuku over SSH — no cable needed) and desktop
-        "hands", with a built‑in chat UI at <code>/ui</code>.
+        (ADB, or remote rish/Shizuku over SSH, no cable needed) and desktop
+        "hands", with a built-in chat UI at <code>/ui</code>.
       </p>
       <div class="hero-actions">
         <a class="btn-primary" href="https://github.com/inoahaipro/token_firewall" target="_blank">↗ View on GitHub</a>
@@ -141,7 +141,7 @@
     </div>
     <div class="stat">
       <div class="stat-num">/ui</div>
-      <div class="stat-label">built‑in chat interface</div>
+      <div class="stat-label">built-in chat interface</div>
     </div>
   </div>
 
@@ -152,7 +152,7 @@
       <p class="section-body">
         Token Firewall speaks the OpenAI API so your client doesn’t have to
         change. Under the hood it routes requests through an intent engine,
-        a two‑tier cache (static packs + learned entries), and platform hands
+        a two-tier cache (static packs + learned entries), and platform hands
         that can actually do things on devices. Only when there’s no good
         answer or plan does it call your underlying LLM.
       </p>
@@ -185,7 +185,7 @@ FirewallRouter
       <h2 class="section-title">running locally in a few commands.</h2>
       <p class="section-body">
         Token Firewall is designed to run close to your agents: Termux on
-        Android, or a normal shell on desktop. Point your OpenAI‑compatible
+        Android, or a normal shell on desktop. Point your OpenAI-compatible
         client at it and let it worry about caching, routing, and device
         actions.
       </p>
@@ -235,7 +235,7 @@ python server.py
 # UI: http://127.0.0.1:8000/ui</pre>
           </div>
           <div class="qs-pane" id="pane-remote">
-            <pre class="code"># On a PC — controls itself AND a separate Android phone over SSH,
+            <pre class="code"># On a PC, controls itself AND a separate Android phone over SSH,
 # no ADB, no cable. Phone needs Shizuku running + rish installed.
 python -m venv venv
 source venv/bin/activate
@@ -252,7 +252,7 @@ nano ~/.token-firewall.env
 #   TF_LLM_MODEL=...
 
 python launch.py
-# CompositeHands loads DesktopHands + RishPhoneHands together —
+# CompositeHands loads DesktopHands + RishPhoneHands together:
 # one instance, both surfaces.</pre>
           </div>
           <div class="qs-pane" id="pane-openclaw">

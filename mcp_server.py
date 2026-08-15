@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-mcp_server.py — Token Firewall MCP Server
+mcp_server.py -- Token Firewall MCP Server
 
 Exposes Token Firewall device actions as MCP tools that OpenClaw agents
 can call directly. Two transport modes:
@@ -382,7 +382,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.http:
-        # Simple HTTP mode — serves MCP over POST /mcp
+        # Simple HTTP mode -- serves MCP over POST /mcp
         from http.server import HTTPServer, BaseHTTPRequestHandler
 
         class Handler(BaseHTTPRequestHandler):
@@ -404,7 +404,7 @@ if __name__ == "__main__":
                 self.end_headers()
                 self.wfile.write(out)
 
-        print(f"Token Firewall MCP server — HTTP mode on port {args.port}", file=sys.stderr)
+        print(f"Token Firewall MCP server -- HTTP mode on port {args.port}", file=sys.stderr)
         HTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
     else:
         # Default: stdio mode for OpenClaw

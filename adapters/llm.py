@@ -1,5 +1,5 @@
 """
-adapters/llm.py — LLM adapter with automatic fallback chain.
+adapters/llm.py -- LLM adapter with automatic fallback chain.
 
 Primary provider: TF_LLM_BASE_URL / TF_LLM_API_KEY / TF_LLM_MODEL
 Fallbacks:        TF_LLM_FALLBACKS = "url|key|model;url|key|model"
@@ -58,7 +58,7 @@ class LLMAdapter:
 
     def __init__(self):
         self._providers = self._build()
-        print(f"[LLM] {len(self._providers)} provider(s) — primary: {self._providers[0].name if self._providers else 'none'}")
+        print(f"[LLM] {len(self._providers)} provider(s) -- primary: {self._providers[0].name if self._providers else 'none'}")
 
     def _build(self) -> list[_Provider]:
         providers = []

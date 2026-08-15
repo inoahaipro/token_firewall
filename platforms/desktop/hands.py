@@ -1,5 +1,5 @@
 """
-platforms/desktop/hands.py — Linux/macOS/Windows execution layer.
+platforms/desktop/hands.py -- Linux/macOS/Windows execution layer.
 """
 import subprocess
 import sys

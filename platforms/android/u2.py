@@ -1,5 +1,5 @@
 """
-platforms/android/u2.py — uiautomator2 wrapper.
+platforms/android/u2.py -- uiautomator2 wrapper.
 
 uiautomator2 is a Python library that runs a server on the device
 and provides a much better API than raw uiautomator dump.
@@ -32,7 +32,7 @@ def _get_device():
         print("[U2] uiautomator2 connected")
         return d
     except Exception as e:
-        print(f"[U2] not available ({e}) — using raw ADB")
+        print(f"[U2] not available ({e}) -- using raw ADB")
         _u2_available = False
         return None
 

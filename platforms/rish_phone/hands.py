@@ -1,5 +1,5 @@
 """
-platforms/rish_phone/hands.py — Android device control over SSH + rish,
+platforms/rish_phone/hands.py -- Android device control over SSH + rish,
 no ADB/USB required. rish gives adb-shell-equivalent access on-device via
 Shizuku; we reach it over the existing durable SSH tunnel to the phone.
 """

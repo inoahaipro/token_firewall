@@ -1,5 +1,5 @@
 """
-platforms/android/hands.py — Android device execution layer.
+platforms/android/hands.py -- Android device execution layer.
 
 Combines Termux API (device sensors/APIs) and ADB (UI automation/system settings).
 Auto-detects what's available. Gracefully degrades if one is missing.
@@ -197,7 +197,7 @@ class AndroidHands:
         health = d.get("health","?").title()
         temp   = d.get("temperature","?")
         plugged= d.get("plugged","").replace("PLUGGED_","").title()
-        return f"Battery: {pct}% — {status}{' (' + plugged + ')' if plugged else ''}\nHealth: {health}, Temp: {temp}°C"
+        return f"Battery: {pct}% -- {status}{' (' + plugged + ')' if plugged else ''}\nHealth: {health}, Temp: {temp}°C"
 
     def _fmt_wifi(self, d: dict) -> str:
         ssid  = d.get("ssid","unknown")
@@ -459,7 +459,7 @@ class AndroidHands:
         except subprocess.TimeoutExpired:
             return ActionResult(success=False, error="ADB timed out")
         except FileNotFoundError:
-            return ActionResult(success=False, error="adb not found — run: pkg install android-tools")
+            return ActionResult(success=False, error="adb not found -- run: pkg install android-tools")
         except Exception as e:
             return ActionResult(success=False, error=str(e))
 
@@ -474,7 +474,7 @@ class AndroidHands:
                 return True, ""
             return False, "No ADB device. Enable USB/Wireless debugging."
         except FileNotFoundError:
-            return False, "adb not found — run: pkg install android-tools"
+            return False, "adb not found -- run: pkg install android-tools"
         except Exception as e:
             return False, str(e)
 

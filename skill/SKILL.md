@@ -3,7 +3,7 @@ name: token-firewall
 description: >
   Control your Android device through natural language. Execute device actions,
   open apps, tap UI elements, type text, scroll, check battery, take photos, 
-  and run multi-step workflows — all at zero token cost via caching.
+  and run multi-step workflows -- all at zero token cost via caching.
 version: 3.0.0
 metadata:
   openclaw:
@@ -23,22 +23,22 @@ metadata:
 
 You have access to the Token Firewall device control system via MCP tools.
 Token Firewall runs locally on the Android device and executes actions via ADB and Termux API.
-Most common actions are cached — they execute instantly at 0 tokens.
+Most common actions are cached -- they execute instantly at 0 tokens.
 
 ## Available Tools
 
-- **device_command** — Natural language device command. Use this for anything not covered by the specific tools below. Examples: "open spotify", "check battery", "set brightness to 50%", "take a photo then go home"
-- **open_app** — Open any installed app by name
-- **tap_screen** — Tap at specific x,y coordinates
-- **find_and_tap** — Find a UI element by text and tap it (no coordinates needed)
-- **type_text** — Type text into the focused field
-- **scroll** — Scroll up or down
-- **key_press** — Press home/back/recent/enter/volume keys
-- **get_screen_state** — Get current app, UI tree, and browser URL — use before navigating
-- **find_element_coords** — Describe an element in plain English, get back x,y coordinates
-- **run_workflow** — Execute a sequence of steps
-- **get_battery** — Check battery level and status
-- **take_screenshot** — Screenshot to /sdcard/screenshot.png
+- **device_command** -- Natural language device command. Use this for anything not covered by the specific tools below. Examples: "open spotify", "check battery", "set brightness to 50%", "take a photo then go home"
+- **open_app** -- Open any installed app by name
+- **tap_screen** -- Tap at specific x,y coordinates
+- **find_and_tap** -- Find a UI element by text and tap it (no coordinates needed)
+- **type_text** -- Type text into the focused field
+- **scroll** -- Scroll up or down
+- **key_press** -- Press home/back/recent/enter/volume keys
+- **get_screen_state** -- Get current app, UI tree, and browser URL -- use before navigating
+- **find_element_coords** -- Describe an element in plain English, get back x,y coordinates
+- **run_workflow** -- Execute a sequence of steps
+- **get_battery** -- Check battery level and status
+- **take_screenshot** -- Screenshot to /sdcard/screenshot.png
 
 ## How to use
 

@@ -1,11 +1,11 @@
 """
-core/intent/engine.py — Classify and decompose prompts into Intent objects.
+core/intent/engine.py -- Classify and decompose prompts into Intent objects.
 
 Intent types:
-  DEVICE  — maps to a known device action (cache → hands)
-  LEARNED — might be in cache from a previous LLM call
-  LLM     — needs live reasoning
-  CHAIN   — multiple intents joined by "then", "and then", etc.
+  DEVICE  -- maps to a known device action (cache → hands)
+  LEARNED -- might be in cache from a previous LLM call
+  LLM     -- needs live reasoning
+  CHAIN   -- multiple intents joined by "then", "and then", etc.
 """
 import re
 import sys

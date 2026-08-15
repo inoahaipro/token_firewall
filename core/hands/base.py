@@ -1,5 +1,5 @@
 """
-core/hands/base.py — Platform-agnostic Hands protocol.
+core/hands/base.py -- Platform-agnostic Hands protocol.
 
 Every platform implements this. The router never imports platform code directly.
 """
@@ -28,7 +28,7 @@ class Hands(Protocol):
         ...
 
     def execute(self, action: dict) -> ActionResult:
-        """Execute the action. Never raises — errors returned in ActionResult."""
+        """Execute the action. Never raises -- errors returned in ActionResult."""
         ...
 
     def capabilities(self) -> list[dict]:
