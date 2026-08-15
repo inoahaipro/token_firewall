@@ -4,7 +4,9 @@ Zero-token AI gateway. Sits between OpenClaw (or any OpenAI-compatible client) a
 
 - **Cache hit** → executes locally, 0 tokens
 - **Cache miss** → calls LLM, learns result, next time is 0 tokens
-- **Device actions** → executes via ADB + Termux API (Android), shell (desktop)
+- **Semantic cache** → paraphrased repeats ("check battery" vs "what's my battery at") still hit cache, not just exact text matches
+- **Device actions** → executes via ADB + Termux API (Android), rish/Shizuku over SSH (remote Android, no ADB needed), or shell (desktop)
+- **Desktop + phone together** → on Linux/macOS/Windows, `CompositeHands` runs desktop shell control and remote-phone rish control side by side, so one TF instance can drive both
 - **Built-in chat UI** at `/ui`, no OpenClaw required
 
 ---
@@ -25,6 +27,32 @@ nano ~/.token-firewall.env
 
 # 4. Run (with auto-restart)
 cd ~/token-firewall-v3 && bash start.sh
+```
+
+## Quick start (Desktop + remote phone, rish/Shizuku)
+
+Runs on a PC and controls both itself (shell) and a separate Android phone over
+SSH via [Shizuku](https://shizuku.rikka.app/)'s `rish` shell -- no ADB, no USB
+connection, no phone unlocked on a desk.
+
+```bash
+# 1. Install deps
+pip install fastapi 'uvicorn[standard]' --break-system-packages
+
+# 2. Configure — needs TF_PLATFORM=linux (or macos/windows) so
+#    CompositeHands loads both DesktopHands and RishPhoneHands
+nano ~/.token-firewall.env
+# TF_PLATFORM=linux
+# TF_LLM_BASE_URL=...
+# TF_LLM_API_KEY=...
+# TF_LLM_MODEL=...
+
+# 3. Make sure the phone side is reachable: Shizuku running + rish installed,
+#    and a durable SSH key set up to the phone (Termux sshd or similar).
+#    See platforms/rish_phone/hands.py for the exact SSH/rish invocation.
+
+# 4. Run (with auto-restart)
+cd ~/token-firewall-v3 && python launch.py
 ```
 
 ## OpenClaw config
@@ -87,10 +115,14 @@ server.py  (FastAPI, async, SSE)
 FirewallRouter
     ├── IntentEngine      classify + split compound intents
     ├── KnowledgeStore    two-tier cache (packs + learned SQLite)
+    │     ├── fuzzy lookup      n-gram similarity
+    │     └── semantic lookup   embedding cosine-similarity (fastembed/MiniLM)
     ├── Platform Hands    execute device actions
-    │     ├── AndroidHands   (Termux API + ADB)
-    │     ├── DesktopHands   (shell commands)
-    │     └── IOSHands       (future)
+    │     ├── AndroidHands    (Termux API + ADB, running on-device)
+    │     ├── RishPhoneHands  (Shizuku/rish over SSH, remote Android control)
+    │     ├── DesktopHands    (shell commands)
+    │     ├── CompositeHands  (Desktop + RishPhone together, on linux/macos/windows)
+    │     └── IOSHands        (future)
     └── LLMAdapter        fallback chain of providers
 ```
 

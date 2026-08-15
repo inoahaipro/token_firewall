@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Token Firewall — zero‑token AI gateway</title>
-  <meta name="description" content="Token Firewall sits between your client and your LLM. Cache hits are 0 tokens, cache misses teach it new skills. With device hands for Android and desktop." />
+  <meta name="description" content="Token Firewall sits between your client and your LLM. Cache hits are 0 tokens, cache misses teach it new skills. Semantic caching catches paraphrased repeats. Device hands for Android (ADB or remote rish/Shizuku) and desktop." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet" />
@@ -97,8 +97,10 @@
       <h1>teach the model once.<br/><em>replay for free.</em></h1>
       <p class="hero-sub">
         Token Firewall sits between your client and your LLM. Cache hits are
-        <strong>0 tokens</strong>, cache misses teach it new skills. It can also
-        execute real <strong>device actions</strong> via Android and desktop
+        <strong>0 tokens</strong>, cache misses teach it new skills — including
+        <strong>semantic matches</strong>, so paraphrased repeats still hit cache.
+        It can also execute real <strong>device actions</strong> via Android
+        (ADB, or remote rish/Shizuku over SSH — no cable needed) and desktop
         "hands", with a built‑in chat UI at <code>/ui</code>.
       </p>
       <div class="hero-actions">
@@ -164,10 +166,14 @@ server.py  (FastAPI · SSE · /v1/chat/completions)
 FirewallRouter
     ├── IntentEngine      · classify prompt · split tasks
     ├── KnowledgeStore    · packs + learned SQLite cache
+    │     ├── fuzzy         · n-gram similarity
+    │     └── semantic      · embedding cosine-similarity (fastembed)
     ├── PlatformHands     · execute device actions
-    │     ├── AndroidHands   (Termux API + ADB)
-    │     ├── DesktopHands   (shell)
-    │     └── IOSHands       (future)
+    │     ├── AndroidHands    (Termux API + ADB)
+    │     ├── RishPhoneHands  (Shizuku/rish over SSH, remote)
+    │     ├── DesktopHands    (shell)
+    │     ├── CompositeHands  (desktop + remote phone together)
+    │     └── IOSHands        (future)
     └── LLMAdapter        · fallback chain of models
       </div>
     </div>
@@ -188,7 +194,8 @@ FirewallRouter
         <div class="qs-nav">
           <button class="qs-tab active" data-tab="android">01 · Android / Termux</button>
           <button class="qs-tab" data-tab="desktop">02 · Desktop</button>
-          <button class="qs-tab" data-tab="openclaw">03 · OpenClaw</button>
+          <button class="qs-tab" data-tab="remote">03 · Desktop + Remote Phone</button>
+          <button class="qs-tab" data-tab="openclaw">04 · OpenClaw</button>
         </div>
         <div>
           <div class="qs-pane active" id="pane-android">
@@ -226,6 +233,27 @@ export TF_LLM_MODEL=gpt-4.1-mini
 
 python server.py
 # UI: http://127.0.0.1:8000/ui</pre>
+          </div>
+          <div class="qs-pane" id="pane-remote">
+            <pre class="code"># On a PC — controls itself AND a separate Android phone over SSH,
+# no ADB, no cable. Phone needs Shizuku running + rish installed.
+python -m venv venv
+source venv/bin/activate
+pip install fastapi "uvicorn[standard]" fastembed
+
+cd ~/code
+git clone https://github.com/inoahaipro/token_firewall.git
+cd token_firewall
+
+nano ~/.token-firewall.env
+#   TF_PLATFORM=linux
+#   TF_LLM_BASE_URL=...
+#   TF_LLM_API_KEY=...
+#   TF_LLM_MODEL=...
+
+python launch.py
+# CompositeHands loads DesktopHands + RishPhoneHands together —
+# one instance, both surfaces.</pre>
           </div>
           <div class="qs-pane" id="pane-openclaw">
             <pre class="code"># Add Token Firewall as a provider in ~/.openclaw/openclaw.json
