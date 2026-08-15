@@ -107,6 +107,33 @@ _CHAIN_SPLITTER = re.compile(
     re.IGNORECASE,
 )
 
+# Simple no-parameter status checks: ANY phrasing containing these keywords
+# (and no "set/turn/change" verb implying a different action) maps to the SAME
+# canonical fingerprint. Without this, "check battery" and "what's my battery"
+# are both correctly classified as DEVICE intents but get different cache
+# entries since the fingerprint was built from the raw phrase -- so repeat
+# checks phrased differently never actually hit cache. This fixes that.
+_CANONICAL_STATUS_CHECKS = {
+    "battery_status": ["battery", "charged", "charging", "charge", "power level", "juice"],
+    "wifi_info":       ["wifi", "wi-fi", "wireless network", "wireless info"],
+    "clipboard_get":   ["clipboard"],
+    "location":        ["gps", "location", "coordinates"],
+}
+_ACTION_VERB_RE = re.compile(
+    r"\b(set|turn on|turn off|enable|disable|change|toggle|connect|disconnect)\b",
+    re.IGNORECASE,
+)
+
+
+def _canonical_status_fp(norm: str, platform: str) -> Optional[str]:
+    if _ACTION_VERB_RE.search(norm):
+        return None  # "turn off wifi" etc is a different action, don't canonicalize
+    for canonical, keywords in _CANONICAL_STATUS_CHECKS.items():
+        if any(kw in norm for kw in keywords):
+            return fingerprint(f"__status__{canonical}", platform)
+    return None
+
+
 # Queries that must never be cached (time-sensitive / creative / conversational)
 _NO_CACHE = re.compile(
     r"\b(today|right now|currently|current time|what time|what day|"
@@ -169,12 +196,17 @@ class IntentEngine:
         fp = fingerprint(template, self.platform)
         cacheable = not bool(_NO_CACHE.search(norm))
 
-        group = _PLATFORM_GROUP.get(self.platform, "desktop")
-        device_keys = _DEVICE_KW.get(group, []) + _DEVICE_KW.get("shared", [])
+        # This deployment runs desktop (root shell) AND phone (rish/SSH) hands
+        # simultaneously, not just cfg.PLATFORM's own group -- check both
+        # keyword lists, not just the one matching the machine TF happens to
+        # be running on. Otherwise phone-only keywords like "battery"/"wifi"
+        # never classify as DEVICE at all when TF runs on the PC.
+        device_keys = _DEVICE_KW.get("mobile", []) + _DEVICE_KW.get("desktop", []) + _DEVICE_KW.get("shared", [])
 
         if any(kw in norm for kw in device_keys):
+            canonical_fp = _canonical_status_fp(norm, self.platform)
             return Intent(raw=text, normalized=norm, kind=DEVICE,
-                          fingerprint=fp, platform=self.platform,
+                          fingerprint=canonical_fp or fp, platform=self.platform,
                           params=params, cacheable=cacheable)
 
         if any(kw in norm for kw in _LLM_KW):

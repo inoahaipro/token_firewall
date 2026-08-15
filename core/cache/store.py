@@ -17,6 +17,43 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+# Action verbs that change state (vs. just reading it) -- a query embedding
+# is never allowed to semantic-match against a cached entry if the NEW query
+# contains one of these, even if the phrases embed as very similar. Verified
+# empirically that e.g. "turn off wifi" and "check wifi" embed at ~0.58
+# cosine similarity (higher than some genuinely-same-topic pairs), so without
+# this gate a toggle command could silently match a cached status-read entry
+# and appear to succeed while doing nothing.
+_SEMANTIC_ACTION_VERB_RE = re.compile(
+    r"\b(set|turn on|turn off|enable|disable|change|toggle|connect|disconnect|"
+    r"start|stop|open|close|launch|kill)\b",
+    re.IGNORECASE,
+)
+
+_SEMANTIC_THRESHOLD = 0.55
+_embed_model = None
+
+
+def _get_embed_model():
+    global _embed_model
+    if _embed_model is None:
+        from fastembed import TextEmbedding
+        _embed_model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    return _embed_model
+
+
+def embed_text(text: str):
+    import numpy as np
+    return next(_get_embed_model().embed([text])).astype("float32")
+
+
+def _cosine(a, b) -> float:
+    import numpy as np
+    denom = (np.linalg.norm(a) * np.linalg.norm(b))
+    if denom == 0:
+        return 0.0
+    return float(np.dot(a, b) / denom)
+
 
 # ── Data shape ────────────────────────────────────────────────────────────────
 
@@ -68,7 +105,8 @@ CREATE TABLE IF NOT EXISTS learned (
     platform     TEXT DEFAULT 'any',
     hits         INTEGER DEFAULT 1,
     learned_at   INTEGER,
-    last_used    INTEGER
+    last_used    INTEGER,
+    embedding    BLOB
 );
 CREATE INDEX IF NOT EXISTS idx_platform  ON learned(platform);
 CREATE INDEX IF NOT EXISTS idx_last_used ON learned(last_used);
@@ -97,6 +135,11 @@ class KnowledgeStore:
         self._db = sqlite3.connect(str(cfg.DB_PATH), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(_SCHEMA)
+        try:
+            self._db.execute("ALTER TABLE learned ADD COLUMN embedding BLOB")
+            self._db.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
         self._db.commit()
 
     def _load_packs(self):
@@ -231,16 +274,65 @@ class KnowledgeStore:
     def learn(self, fp: str, intent_text: str, action: dict, platform: str = "any", confidence: float = 1.0):
         """Write or update a Tier 2 entry."""
         now = int(time.time())
+        try:
+            emb_bytes = embed_text(intent_text).tobytes() if intent_text else None
+        except Exception as e:
+            print(f"[EMBED] failed for {intent_text!r}: {e}")
+            emb_bytes = None
         self._db.execute("""
-            INSERT INTO learned (fingerprint, intent_text, action_json, confidence, platform, hits, learned_at, last_used)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            INSERT INTO learned (fingerprint, intent_text, action_json, confidence, platform, hits, learned_at, last_used, embedding)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(fingerprint) DO UPDATE SET
                 action_json = excluded.action_json,
                 confidence  = excluded.confidence,
                 hits        = hits + 1,
-                last_used   = excluded.last_used
-        """, (fp, intent_text, json.dumps(action), confidence, platform, now, now))
+                last_used   = excluded.last_used,
+                embedding   = COALESCE(excluded.embedding, learned.embedding)
+        """, (fp, intent_text, json.dumps(action), confidence, platform, now, now, emb_bytes))
         self._db.commit()
+
+    def semantic_lookup(self, query: str) -> Optional[CacheEntry]:
+        """Embedding-similarity match across learned entries. Safety-gated:
+        never matches if the query contains a state-changing verb (turn on/off,
+        set, toggle, etc) since those must never be confused with a cached
+        status-read entry, no matter how similar the phrasing embeds."""
+        if _SEMANTIC_ACTION_VERB_RE.search(query):
+            return None
+        try:
+            import numpy as np
+            q_emb = embed_text(query)
+        except Exception as e:
+            print(f"[EMBED] query embed failed: {e}")
+            return None
+
+        best_score, best_row = 0.0, None
+        rows = self._db.execute(
+            "SELECT * FROM learned WHERE embedding IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            cached_emb = np.frombuffer(row["embedding"], dtype="float32")
+            score = _cosine(q_emb, cached_emb)
+            if score > best_score:
+                best_score, best_row = score, row
+
+        if best_row is None or best_score < _SEMANTIC_THRESHOLD:
+            return None
+
+        print(f"[SEMANTIC] {query!r} → {best_row['intent_text']!r} (score={best_score:.3f})")
+        self._db.execute(
+            "UPDATE learned SET hits = hits+1, last_used = ? WHERE fingerprint = ?",
+            (int(time.time()), best_row["fingerprint"]),
+        )
+        self._db.commit()
+        return CacheEntry(
+            fingerprint=best_row["fingerprint"],
+            action=json.loads(best_row["action_json"]),
+            confidence=best_row["confidence"],
+            platform=best_row["platform"],
+            hits=best_row["hits"] + 1,
+            source="learned",
+            intent_text=best_row["intent_text"] or "",
+        )
 
     def evict(self, fp: str):
         """Remove a bad entry."""

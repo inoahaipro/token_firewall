@@ -96,6 +96,8 @@ Available action types:
 - adb_command    {"cmd": "shell command"}
 - vibrate        {"duration_ms": 500}
 - torch          {"state": "on|off"}
+- toast          {"message": "..."}
+- notify         {"title": "...", "content": "..."}
 - take_photo     {"filename": "/sdcard/photo.jpg"}
 - battery_status {}
 - wifi_info      {}

@@ -36,6 +36,31 @@ from adapters.llm import LLMAdapter
 
 # ── Platform hands loader ─────────────────────────────────────────────────────
 
+class CompositeHands:
+    """Desktop hands (this machine) + rish/SSH phone hands (remote Android),
+    both live simultaneously since TF runs on the PC but can drive either."""
+
+    def __init__(self, *sub_hands):
+        self._subs = list(sub_hands)
+        self.platform_id = "+".join(h.platform_id for h in self._subs)
+
+    def capabilities(self):
+        caps = []
+        for h in self._subs:
+            caps.extend(h.capabilities())
+        return caps
+
+    def can_execute(self, action):
+        return any(h.can_execute(action) for h in self._subs)
+
+    def execute(self, action):
+        for h in self._subs:
+            if h.can_execute(action):
+                return h.execute(action)
+        from core.hands.base import ActionResult
+        return ActionResult(False, error=f"no hands claim action: {action.get('type')}")
+
+
 def _load_hands():
     p = cfg.PLATFORM
     if p == "android":
@@ -44,7 +69,8 @@ def _load_hands():
     elif p in ("linux", "macos", "windows"):
         try:
             from platforms.desktop.hands import DesktopHands
-            return DesktopHands()
+            from platforms.rish_phone.hands import RishPhoneHands
+            return CompositeHands(DesktopHands(), RishPhoneHands())
         except ImportError:
             return _NoHands(p)
     elif p == "ios":

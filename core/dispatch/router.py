@@ -27,7 +27,22 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parents[2]))
 import core.config as cfg
 from core.cache.store import KnowledgeStore, CacheEntry, fingerprint
-from core.intent.engine import IntentEngine, Intent, DEVICE, LEARNED, LLM, CHAIN
+from core.intent.engine import IntentEngine, Intent, DEVICE, LEARNED, LLM, CHAIN, _CANONICAL_STATUS_CHECKS
+
+
+def _category_mismatch(query_norm: str, action_type: str) -> bool:
+    """True if the query text mentions a DIFFERENT known status-check category
+    than the cached entry's own action type -- e.g. query says 'wifi' but the
+    matched cache entry is battery_status. Catches cross-topic false-positive
+    matches from fuzzy/semantic lookup (found live: 'check wifi' matched a
+    cached battery_status entry via generic word overlap -- silently wrong
+    data is worse than a cache miss, so any such mismatch is rejected)."""
+    for category, keywords in _CANONICAL_STATUS_CHECKS.items():
+        if category == action_type:
+            continue
+        if any(kw in query_norm for kw in keywords):
+            return True
+    return False
 
 
 @dataclass
@@ -201,8 +216,22 @@ class FirewallRouter:
                     if any(v in norm for v in ("type","say","message","enter","write","send")) and \
                        any(app in norm for app in _APP_TYPING_APPS):
                         entry = None
+                # Reject cross-topic false matches (e.g. "check wifi" fuzzy-matching a cached battery_status entry)
+                if entry and _category_mismatch(norm, atype):
+                    print(f"[FUZZY] rejected cross-topic match: '{norm}' vs {atype}")
+                    entry = None
             if entry:
                 print(f"[FUZZY] '{intent.normalized}' → {entry.action.get('type')}")
+                r = self._exec_cached(entry, None, intent.params)
+                if r is not None:
+                    self._cache_hits += 1; self._tokens_saved += 500
+                    return r
+
+            entry = self.store.semantic_lookup(intent.normalized)
+            if entry and _category_mismatch(intent.normalized, entry.action.get("type")):
+                print(f"[SEMANTIC] rejected cross-topic match: '{intent.normalized}' vs {entry.action.get('type')}")
+                entry = None
+            if entry:
                 r = self._exec_cached(entry, None, intent.params)
                 if r is not None:
                     self._cache_hits += 1; self._tokens_saved += 500
@@ -230,6 +259,15 @@ class FirewallRouter:
         entry = self.store.fuzzy_lookup(intent.normalized)
         if entry and entry.action.get("type") == "llm_response":
             print(f"[FUZZY] '{intent.normalized}' → cached LLM")
+            r = self._serve_cached_llm(entry)
+            self._cache_hits += 1; self._tokens_saved += 500
+            return r
+
+        entry = self.store.semantic_lookup(intent.normalized)
+        if entry and _category_mismatch(intent.normalized, entry.action.get("type")):
+            print(f"[SEMANTIC] rejected cross-topic match: '{intent.normalized}' vs {entry.action.get('type')}")
+            entry = None
+        if entry:
             r = self._serve_cached_llm(entry)
             self._cache_hits += 1; self._tokens_saved += 500
             return r
@@ -287,6 +325,14 @@ class FirewallRouter:
         except Exception as e:
             return Response(f"LLM error: {e}", source="llm_error")
         self._tokens_spent += tokens
+        # No-cache intents (time-sensitive/creative/convo) still deserve real
+        # device-action execution if the LLM returned one -- only the caching
+        # step should be skipped here, not the action-detection/execution step.
+        action = _extract_action(text)
+        if action:
+            print(f"[LLM→ACTION] (no-cache) type={action.get('type')}")
+            content = self._run_action(action)
+            return Response(content, tokens_spent=tokens, source="llm_action")
         return Response(text, tokens_spent=tokens, source="llm_passthrough")
 
     def _call_llm(self, intent: Intent) -> Response:
