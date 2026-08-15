@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Token Firewall v3 — setup
+# Token Firewall v3: setup
 # Works on Android (Termux), Linux, macOS
 
 set -e
@@ -18,25 +18,24 @@ fi
 
 # Android extras
 if [ -d "/data/data/com.termux" ]; then
-    echo "Android detected — checking Termux packages..."
+    echo "Android detected, checking Termux packages..."
     pkg install -y android-tools termux-api 2>/dev/null || true
 fi
 
 # Create env file if missing
 if [ ! -f ~/.token-firewall.env ]; then
 cat > ~/.token-firewall.env << 'ENV'
-# Token Firewall v3 — Environment Config
+# Token Firewall v3: Environment Config
 # Copy this and fill in your values
 
 export TF_PLATFORM=android         # auto-detected if not set
 
-# LLM — primary provider
+# LLM: primary provider
 export TF_LLM_BASE_URL=https://integrate.api.nvidia.com/v1
 export TF_LLM_API_KEY=your-api-key-here
 export TF_LLM_MODEL=moonshotai/kimi-k2.5
 
-# LLM — fallback chain (semicolon separated: url|key|model)
-# LLM fallbacks — semicolon separated: url|key|model
+# LLM fallback chain (semicolon separated: url|key|model)
 # IMPORTANT: must be single-quoted to prevent shell interpreting | as pipe
 export TF_LLM_FALLBACKS='https://api.cerebras.ai/v1|your-cerebras-key|gpt-oss-120b'
 
@@ -50,7 +49,7 @@ export TF_PORT=8000
 # export TF_DISABLE_ADB=false
 # export TF_DISABLE_TERMUX=false
 ENV
-    echo "Created ~/.token-firewall.env — fill in your API keys"
+    echo "Created ~/.token-firewall.env, fill in your API keys"
 fi
 
 echo ""

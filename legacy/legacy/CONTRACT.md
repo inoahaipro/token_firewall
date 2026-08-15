@@ -1,4 +1,4 @@
-# CONTRACT.md — wrangle-imprint interface spec (v2.0.0)
+# CONTRACT.md: wrangle-imprint interface spec (v2.0.0)
 
 This document describes the JSON/CLI contracts used between:
 

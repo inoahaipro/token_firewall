@@ -1,5 +1,5 @@
 """
-imprint.py — Local Agentic Model (LAM) for OpenClaw
+imprint.py: Local Agentic Model (LAM) for OpenClaw
 =====================================================
 v2.0.0
 
@@ -184,7 +184,7 @@ PARAM_PATTERNS = [
     # Captures: "search for X on Y", "play X on Y", "watch X on Y", "find X", "look up X"
     # Stops before " on ", " in ", " at " to avoid swallowing the app/platform name
     (re.compile(r'\b(?:search for|search|play|watch|find|look up|listen to)\s+(.+?)(?=\s+(?:on|in|at|via|using)\s+\w|\s*$)', re.I), "query", False),
-    # Contact after action verb — captures Title Case AND lowercase names
+    # Contact after action verb: captures Title Case AND lowercase names
     # Stops at prepositions (on, via, in, at, through) to avoid "Mom on WhatsApp" → "Mom on"
     # Examples: "message mom", "call John", "text Dr Smith"
     (re.compile(r'\b(?:message|call|text|dm|email)\s+((?:Dr\.?\s+)?\w+(?:\s+\w+)??)(?=\s+(?:on|via|in|at|through|using|with)|\s+saying|\s+with\s+|$)', re.I), "contact", False),
@@ -424,7 +424,7 @@ def mark_failure(conn, pid, reason=""):
     conn.commit()
     row = conn.execute("SELECT consecutive_failures, template FROM plans WHERE id=?", (pid,)).fetchone()
     if row and row[0] >= MAX_FAILURES:
-        print(f"⚠️  '{row[1]}' failed {row[0]}x — evicting")
+        print(f"⚠️  '{row[1]}' failed {row[0]}x, evicting")
         conn.execute("DELETE FROM plans WHERE id=?", (pid,))
         conn.commit()
 
@@ -623,7 +623,7 @@ def pc_do_action(action):
                 if action.get("action") == "type" and r.returncode == 0:
                     return {"ok": True, "executed": "type", "text": action.get("text", "")}
                 return {"ok": False, "error": f"invalid json from wrangle: {e}"}
-        # No output at all — treat type as fire-and-forget success.
+        # No output at all: treat type as fire-and-forget success.
         if action.get("action") == "type" and r.returncode == 0:
             return {"ok": True, "executed": "type", "text": action.get("text", "")}
         return {"ok": False, "error": "empty response from wrangle"}
@@ -659,7 +659,7 @@ def input_focused(elements):
 def execute_one_step(step, elements, intent="", hash_before=""):
     """Run one step. Returns structured result dict.
 
-    hash_before — pass the screen hash already known to the caller to avoid
+    hash_before: pass the screen hash already known to the caller to avoid
                   a redundant pc_get_state() call on every step.
     Returns dict with optional 'state_after' key when screen changed, so the
     caller can reuse it without another UIAutomator dump.
@@ -694,7 +694,7 @@ def execute_one_step(step, elements, intent="", hash_before=""):
             cy = step.get("y") or (elements[0]["y"] if elements else 1170)
         payload["x"], payload["y"] = int(cx), int(cy)
         log.debug(
-            f"Target '{target_spec}' not found in {len(elements)} elements — "
+            f"Target '{target_spec}' not found in {len(elements)} elements, "
             f"using fallback coords ({payload['x']},{payload['y']})"
         )
 
@@ -719,7 +719,7 @@ def execute_one_step(step, elements, intent="", hash_before=""):
             )
 
     if action == "type" and not input_focused(elements) and not keyboard_open():
-        log.debug("No focused input before type — proceeding anyway")
+        log.debug("No focused input before type, proceeding anyway")
 
     # Facebook composer special-case: if this is the "publish" tap for a
     # post, many builds require tapping a "Done" control before tapping
@@ -830,7 +830,7 @@ def execute_one_step(step, elements, intent="", hash_before=""):
             # Return the fresh state so the caller can reuse it without another dump
             result["state_after"] = state_after
         if action == "tap" and not result["screen_changed"]:
-            log.debug(f"Tap at step — screen unchanged (may be normal)")
+            log.debug(f"Tap at step: screen unchanged (may be normal)")
 
     result["success"] = True
     return result
@@ -838,7 +838,7 @@ def execute_one_step(step, elements, intent="", hash_before=""):
 DESTRUCTIVE_ACTIONS = {
     "delete", "remove", "uninstall", "reset", "clear", "format",
     "purchase", "buy", "pay", "checkout",
-    "send",   # confirmed in context — message sending is OK, but flag for aware execution
+    "send",   # confirmed in context: message sending is OK, but flag for aware execution
     "submit", "post", "publish", "share",
     "call",   # actually dials a number
 }
@@ -860,8 +860,8 @@ def execute_steps(conn, steps, intent="", plan_id_str=None, params=None,
     Also applies small, intent-aware post-processing tweaks, e.g. for
     search-like tasks that type into a field but forget to submit.
 
-    confirmed=True   — skip destructive safety prompt (OpenClaw dispatcher mode)
-    interactive=True — prompt human via stdin if not confirmed (default for CLI use)
+    confirmed=True   : skip destructive safety prompt (OpenClaw dispatcher mode)
+    interactive=True : prompt human via stdin if not confirmed (default for CLI use)
                        set False when called from dispatch context to fail-safe instead
 
     Returns (success, drift, error, steps_taken, step_results)
@@ -885,7 +885,7 @@ def execute_steps(conn, steps, intent="", plan_id_str=None, params=None,
                 "delay": 0.5,
             }]
 
-    # Safety gate — block or prompt on destructive intents
+    # Safety gate: block or prompt on destructive intents
     if is_destructive(intent) and not confirmed:
         print(f"  ⚠️  SAFETY: '{intent}' matches destructive action pattern.")
         if interactive:
@@ -896,7 +896,7 @@ def execute_steps(conn, steps, intent="", plan_id_str=None, params=None,
             if ans != "y":
                 return False, False, ERR_UNSAFE_BLOCKED, 0, []
         else:
-            # Non-interactive (dispatcher) — fail safe, require explicit confirmed=True
+            # Non-interactive (dispatcher): fail safe, require explicit confirmed=True
             return False, False, ERR_UNSAFE_BLOCKED, 0, []
 
     step_results = []
@@ -925,7 +925,7 @@ def execute_steps(conn, steps, intent="", plan_id_str=None, params=None,
         if time.time() > deadline:
             return False, False, ERR_TIMEOUT, steps_taken, step_results
 
-        print(f"  [{i+1}/{len(steps)}] {step.get('action')} — {step.get('reason','')}")
+        print(f"  [{i+1}/{len(steps)}] {step.get('action')}, {step.get('reason','')}")
 
         step_ok, last_err = False, None
         for attempt in range(1, MAX_RETRIES + 2):
@@ -967,7 +967,7 @@ def execute_steps(conn, steps, intent="", plan_id_str=None, params=None,
             consecutive_step_failures += 1
             print(f"  ❌ Step {i+1} failed after {MAX_RETRIES} retries: {last_err}")
 
-            # Mid-task replan — only fire after 2 consecutive step failures to avoid
+            # Mid-task replan: only fire after 2 consecutive step failures to avoid
             # burning tokens on transient issues (slow load, mid-transition screen, etc.)
             if consecutive_step_failures >= 2:
                 remaining = [s for s in steps[i:] if s.get("action") != "done"]
@@ -1082,7 +1082,7 @@ Example target: {{"text":"Send"}}, {{"id":"send_button"}}, {{"desc":"Search"}}""
         return None, f"JSON parse error: {e}", tok, ms
 
 def ask_llm_replan(intent, failed_step, current_state, remaining_steps):
-    # Use same compact format as ask_llm_for_plan — raw elements are ~20 fields each
+    # Use same compact format as ask_llm_for_plan; raw elements are ~20 fields each
     compact_elements = []
     for el in current_state.get("elements", [])[:15]:
         e = {}
@@ -1128,7 +1128,7 @@ def route(intent, conn, dry_run=False, confirmed=False):
     ).fetchone()[0]
     if app_count == 0 or (last_refresh and
             (datetime.now() - datetime.fromisoformat(last_refresh)).total_seconds() > 86400):
-        log.debug("App cache stale — refreshing...")
+        log.debug("App cache stale, refreshing...")
         refresh_apps(conn)
 
     print(f"\n{'='*54}")
@@ -1149,7 +1149,7 @@ def route(intent, conn, dry_run=False, confirmed=False):
             target_pkg = resolve_app(conn, params["app"])
             plan_ctx   = str(plan["context"]).strip()
             if plan_ctx and target_pkg and plan_ctx != target_pkg:
-                print(f"\n⚠️  Cache plan context '{plan_ctx}' != target app '{target_pkg}' — ignoring plan")
+                print(f"\n⚠️  Cache plan context '{plan_ctx}' != target app '{target_pkg}', ignoring plan")
                 plan, sim = None, 0.0
         except Exception:
             pass
@@ -1177,7 +1177,7 @@ def route(intent, conn, dry_run=False, confirmed=False):
         ms = int((time.time()-t0)*1000)
 
         if drift:
-            print(f"\n⚠️  Drift — falling through to LLM...")
+            print(f"\n⚠️  Drift, falling through to LLM...")
             mark_failure(conn, plan["id"], "drift")
             plan = None
 
@@ -1199,7 +1199,7 @@ def route(intent, conn, dry_run=False, confirmed=False):
 
     # ── LLM path ──────────────────────────────────────────────────────────────
     if not plan:
-        print(f"\n🔍 Cache MISS (best sim={sim:.2f}) — querying LLM...")
+        print(f"\n🔍 Cache MISS (best sim={sim:.2f}), querying LLM...")
 
         if not OPENCLAW_SESSION:
             return {"source":"llm","success":False,"error":ERR_NO_LLM_KEY}
@@ -1207,7 +1207,7 @@ def route(intent, conn, dry_run=False, confirmed=False):
         print("  Getting phone state...")
         phone_state = pc_get_state(task=intent)
         if phone_state.get("error"):
-            print(f"  ⚠️  {phone_state['error']} — planning blind")
+            print(f"  ⚠️  {phone_state['error']}, planning blind")
             phone_state = {"elements":[],"foreground_app":"unknown","screen_hash":""}
 
         steps, error, tokens, llm_ms = ask_llm_for_plan(intent, template, params, phone_state)
@@ -1244,7 +1244,7 @@ def route(intent, conn, dry_run=False, confirmed=False):
             log_task(conn, intent, template, "llm", pid, 0.0, 1, tokens, ms, steps_taken)
             trust_msg = "TRUSTED" if newly_trusted else f"PENDING (1/{N_CONFIRM})"
             print(f"\n✅ DONE  LLM · {tokens} tokens · {ms}ms")
-            print(f"   Stored '{pid}' as {trust_msg} — next time: {'0 tokens' if newly_trusted else f'need {N_CONFIRM-1} more run(s)'}")
+            print(f"   Stored '{pid}' as {trust_msg}, next time: {'0 tokens' if newly_trusted else f'need {N_CONFIRM-1} more run(s)'}")
             return {"source":"llm","plan_id":pid,"tokens":tokens,"duration_ms":ms,
                     "steps_taken":steps_taken,"trusted":newly_trusted}
         else:
@@ -1347,7 +1347,7 @@ def list_plans(conn):
     print()
 
 def forget_plan_by_id(conn, pid):
-    """Surgically evict a plan by exact ID — no fuzzy matching."""
+    """Surgically evict a plan by exact ID, no fuzzy matching."""
     row = conn.execute("SELECT template FROM plans WHERE id=?", (pid,)).fetchone()
     if row:
         conn.execute("DELETE FROM plans WHERE id=?", (pid,))
@@ -1396,7 +1396,7 @@ def run_check():
         ok_resp = r.returncode == 0
         print(
             f"{'✅' if ok_resp else '❌'} OpenClaw:     session='{OPENCLAW_SESSION}' "
-            f"{'reachable' if ok_resp else 'FAILED — ' + (r.stderr.strip()[:60] or 'unknown error')}"
+            f"{'reachable' if ok_resp else 'FAILED: ' + (r.stderr.strip()[:60] or 'unknown error')}"
         )
     except Exception as e:
         print(f"⚠️  OpenClaw:     session='{OPENCLAW_SESSION}' check failed ({e})")
@@ -1425,7 +1425,7 @@ def run_check():
 def cli():
     args = sys.argv[1:]
     if not args:
-        print(f"IMPRINT v{VERSION} — Local Agentic Model")
+        print(f"IMPRINT v{VERSION}: Local Agentic Model")
         print("  ask '<task>' [--dry]  stats  list  forget '<task>'  apps  check")
         return 0
 

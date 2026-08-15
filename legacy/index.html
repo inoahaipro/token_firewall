@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>wrangle-imprint — local phone brain for Android</title>
+  <title>wrangle-imprint: local phone brain for Android</title>
   <meta name="description" content="Teach your phone a task once. It replays forever with zero tokens. Local Android automation that learns." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -679,7 +679,7 @@
       color: #2a2a2a;
     }
 
-    /* Reveal animation — desktop only */
+    /* Reveal animation: desktop only */
     @media (hover: hover) {
       .reveal {
         opacity: 0;
@@ -694,7 +694,7 @@
 
     /* ── Responsive ── */
     @media (max-width: 900px) {
-      /* Nav — hide text links, keep logo + github */
+      /* Nav: hide text links, keep logo + github */
       nav { padding: 14px 20px; }
       nav ul li:not(:last-child) { display: none; }
       nav ul { gap: 0; }
@@ -749,7 +749,7 @@
       .qs-tab.active { border-left: none; border-bottom-color: var(--accent); }
       pre.code-block { font-size: 12px; padding: 20px 16px; white-space: pre-wrap; word-break: break-word; }
 
-      /* Compare table — scroll on mobile */
+      /* Compare table: scroll on mobile */
       .compare-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: calc(100vw - 40px); }
       .compare-table th, .compare-table td { padding: 12px 14px; white-space: nowrap; }
 
@@ -794,7 +794,7 @@
       <div class="hero-tag">Android automation · local · v2.0.0</div>
       <h1>teach it once.<br/><em>replay forever.</em></h1>
       <p class="hero-sub">
-        A local phone brain for Android. The LLM teaches a task once —
+        A local phone brain for Android. The LLM teaches a task once, then
         <strong>IMPRINT executes it forever</strong> from SQLite memory
         with zero tokens. Uses your OpenClaw default LLM session for new tasks. Runs in Termux.
       </p>
@@ -822,7 +822,7 @@
   Template: open <span class="t-key">{app}</span> and search for <span class="t-key">{message}</span>
 <span class="t-dim">══════════════════════════════════════════════════════</span>
 
-<span class="t-err">🔍 Cache MISS</span> — querying LLM...
+<span class="t-err">🔍 Cache MISS</span>, querying LLM...
   LLM: 5 steps · <span class="t-key">812 tokens</span> · 1420ms
   [1/5] launch → youtube
   [2/5] tap → search bar
@@ -854,7 +854,7 @@
     </div>
     <div class="stat">
       <div class="stat-num">100<span>%</span></div>
-      <div class="stat-label">local — no cloud required</div>
+      <div class="stat-label">local, no cloud required</div>
     </div>
     <div class="stat">
       <div class="stat-num">2<span>files</span></div>
@@ -869,7 +869,7 @@
       <h2 class="section-title">LLM for the new.<br/>IMPRINT for the known.</h2>
       <p class="section-body reveal">
         Two components. One learns from experience and caches structured plans.
-        The other controls your phone via ADB and UIAutomator. They work together —
+        The other controls your phone via ADB and UIAutomator. They work together,
         and over time the LLM barely fires at all.
       </p>
 
@@ -963,7 +963,7 @@
         <div class="feature">
           <div class="feature-num">02</div>
           <div class="feature-title"><span>element-based</span> targeting</div>
-          <div class="feature-body">Steps target UI elements by text, resource-id, or content-desc — not raw coordinates. Works even if the screen layout shifts slightly.</div>
+          <div class="feature-body">Steps target UI elements by text, resource-id, or content-desc, not raw coordinates. Works even if the screen layout shifts slightly.</div>
         </div>
         <div class="feature">
           <div class="feature-num">03</div>
@@ -973,12 +973,12 @@
         <div class="feature">
           <div class="feature-num">04</div>
           <div class="feature-title"><span>mid-task</span> replan</div>
-          <div class="feature-body">If a step fails mid-execution, IMPRINT calls the LLM with the current screen state and remaining steps to recover — without starting over.</div>
+          <div class="feature-body">If a step fails mid-execution, IMPRINT calls the LLM with the current screen state and remaining steps to recover, without starting over.</div>
         </div>
         <div class="feature">
           <div class="feature-num">05</div>
           <div class="feature-title"><span>destructive</span> action guard</div>
-          <div class="feature-body">Delete, uninstall, purchase, reset — all blocked by default. Requires explicit --confirmed flag or interactive y/N prompt. Not bypassable by the LLM.</div>
+          <div class="feature-body">Delete, uninstall, purchase, reset: all blocked by default. Requires explicit --confirmed flag or interactive y/N prompt. Not bypassable by the LLM.</div>
         </div>
         <div class="feature">
           <div class="feature-num">06</div>
@@ -1089,10 +1089,10 @@
 ✅ OpenClaw: session='main' reachable (for imprint planning)</span></pre>
           </div>
           <div class="qs-content" id="tab-first-run">
-            <pre class="code-block"><span class="c-comment"># First run — cache miss, LLM plans it</span>
+            <pre class="code-block"><span class="c-comment"># First run, cache miss, LLM plans it</span>
 <span class="c-cmd">python</span> imprint.py ask <span class="c-flag">"open youtube and search for lo-fi hip hop"</span>
 
-<span class="c-comment"># Same task again — cache hit, 0 tokens</span>
+<span class="c-comment"># Same task again, cache hit, 0 tokens</span>
 <span class="c-cmd">python</span> imprint.py ask <span class="c-flag">"open youtube and search for drum and bass"</span>
 
 <span class="c-comment"># Destructive actions need explicit confirmation</span>

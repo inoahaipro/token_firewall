@@ -1,21 +1,21 @@
 """
-wrangle.py — Android UI Controller v2.0.0 (IMPRINT execution adapter)
+wrangle.py: Android UI Controller v2.0.0 (IMPRINT execution adapter)
 ==========================================================
 
 WHAT THIS DOES:
   Controls Chrome and Android apps using a text-first approach.
 
-  TRACK 1 — BROWSER (Chrome via agent-browser + Cerebras):
+  TRACK 1 - BROWSER (Chrome via agent-browser + Cerebras):
     Uses agent-browser --cdp 9222 to get an accessibility tree snapshot
     of Chrome, feeds it as text to Cerebras GPT-OSS 120B, gets back an
     action (click ref / type / press key), executes it.
 
-  TRACK 2 — NATIVE APPS (UIAutomator + Cerebras):
+  TRACK 2 - NATIVE APPS (UIAutomator + Cerebras):
     Dumps the Android UI hierarchy as XML, ranks useful elements,
     feeds a compact structured summary to Cerebras, gets back an
     action (tap / type / swipe / keyevent / launch / done), executes it.
 
-  TRACK 3 — NATIVE VISION (optional, currently disabled in auto-routing):
+  TRACK 3 - NATIVE VISION (optional, currently disabled in auto-routing):
     Screenshot + vision LLM fallback for weird apps where UIAutomator is weak.
 
 NOTES:
@@ -43,7 +43,7 @@ CONFIG (env vars):
   DEVICE_WIDTH / HEIGHT   Screen resolution (default 1080x2340 for S22+)
 
 ADB CONNECTIVITY:
-  Runs IN Termux on the device — connects via localhost ADB.
+  Runs IN Termux on the device, connects via localhost ADB.
   When WiFi drops, adbd may kill the TCP socket even on loopback.
   ensure_connected() auto-reconnects before every operation.)
 """
@@ -62,7 +62,7 @@ import xml.etree.ElementTree as ET
 # ── Config ────────────────────────────────────────────────────────────────────
 
 # ADB_PORT: 5555 is the standard ADB-over-TCP default.
-# OpenClaw Termux tunnel uses 45171 — set ADB_PORT=45171 in that case.
+# OpenClaw Termux tunnel uses 45171: set ADB_PORT=45171 in that case.
 ADB_PORT      = os.environ.get("ADB_PORT", "45171")
 ADB           = f"adb -s localhost:{ADB_PORT}"
 # CEREBRAS_KEY can be set via env; falls back to the key from openclaw.json
@@ -77,7 +77,7 @@ ADB_RETRIES     = int(os.environ.get("WRANGLE_ADB_RETRIES",     "3"))
 
 log = logging.getLogger("wrangle")
 
-# Screen resolution — change these if you are not on an S22+ (1080x2340).
+# Screen resolution: change these if you are not on an S22+ (1080x2340).
 DEVICE_WIDTH  = int(os.environ.get("DEVICE_WIDTH",  "1080"))
 DEVICE_HEIGHT = int(os.environ.get("DEVICE_HEIGHT", "2340"))
 
@@ -107,7 +107,7 @@ def ensure_connected(retries=None, backoff=2.0):
 
     Why this exists: adbd on Android often binds to the WiFi interface even
     for localhost connections. When the phone leaves WiFi (or WiFi drops
-    briefly), the TCP socket dies — even though Termux and adbd are both
+    briefly), the TCP socket dies, even though Termux and adbd are both
     on the same device. This function detects the dead socket and reconnects
     before every ADB operation so callers never see a stale connection.
 
@@ -130,7 +130,7 @@ def ensure_connected(retries=None, backoff=2.0):
     return False
 
 def reconnect():
-    """Legacy alias — prefer ensure_connected() for new code."""
+    """Legacy alias, prefer ensure_connected() for new code."""
     ensure_connected()
     print(f"ADB: connected to localhost:{ADB_PORT}, CDP forwarded")
 
@@ -258,7 +258,7 @@ def _resolve_launch_target(app_name):
 def launch_app(app_name, url=None, wait=2):
     """Launch app by name. Returns package string for verification."""
     if url:
-        # URL launch — Chrome or intent
+        # URL launch: Chrome or intent
         chrome = APPS.get("chrome", "com.android.chrome/com.google.android.apps.chrome.Main")
         subprocess.run(
             f'{ADB} shell am start -n {chrome} -d "{url}"',
@@ -537,11 +537,11 @@ def element_score(el, task=""):
 def collect_ui_elements(task=""):
     """Return ranked visible UI elements plus a stable screen hash.
 
-    Retries up to 3 times if UIAutomator returns an empty dump — this happens
+    Retries up to 3 times if UIAutomator returns an empty dump. This happens
     when the screen is mid-transition, locked, or the system is briefly busy.
     """
     for attempt in range(1, 4):
-        # Wake screen first — UIAutomator returns empty on a locked/sleeping display
+        # Wake screen first: UIAutomator returns empty on a locked/sleeping display
         subprocess.run(f"{ADB} shell input keyevent KEYCODE_WAKEUP",
                        shell=True, capture_output=True)
         subprocess.run(
@@ -629,13 +629,13 @@ def collect_ui_elements(task=""):
             time.sleep(0.8)
             continue
 
-        # Got elements — no need to retry
+        # Got elements, no need to retry
         break
 
     elements.sort(key=lambda e: e["score"], reverse=True)
     ranked = elements[:MAX_UI_ELEMENTS]
 
-    # Normalized for stable screen hash — uses only content fields, not coords
+    # Normalized for stable screen hash: uses only content fields, not coords
     normalized = [
         {"label": e["label"], "class": e["class"],
          "resource_id": e.get("resource_id",""), "clickable": e["clickable"]}
@@ -694,7 +694,7 @@ def _get_foreground_app():
                               dumpsys activity top → ACTIVITY line.
     Returns package string or empty string on failure.
     """
-    # Method 1 — activity stack (reliable on most versions)
+    # Method 1: activity stack (reliable on most versions)
     try:
         r = subprocess.run(
             f"{ADB} shell dumpsys activity activities",
@@ -708,7 +708,7 @@ def _get_foreground_app():
     except Exception:
         pass
 
-    # Method 2 — window focus (works on Android 12/13/14)
+    # Method 2: window focus (works on Android 12/13/14)
     try:
         r = subprocess.run(
             f"{ADB} shell dumpsys window windows",
@@ -722,7 +722,7 @@ def _get_foreground_app():
     except Exception:
         pass
 
-    # Method 3 — activity top (last resort, slower but universal)
+    # Method 3: activity top (last resort, slower but universal)
     try:
         r = subprocess.run(
             f"{ADB} shell dumpsys activity top",
@@ -753,7 +753,7 @@ def get_phone_state(task=""):
         role = "input" if el["editable"] else "button" if el["clickable"] else el["class"].lower()
         cx, cy = el["center"]
         elements.append({
-            # Identity — IMPRINT resolver targets by these fields
+            # Identity: IMPRINT resolver targets by these fields
             "id":           el["id"],
             "text":         el.get("resource_id","") and el["label"] or el["label"],
             "label":        el["label"],
@@ -771,7 +771,7 @@ def get_phone_state(task=""):
             "checkable":    el["checkable"],
             "checked":      el["checked"],
             "selected":     el["selected"],
-            # Position — absolute + normalized
+            # Position: absolute + normalized
             "x":            cx,
             "y":            cy,
             "x_norm":       round(cx / DEVICE_WIDTH,  4),
@@ -913,7 +913,7 @@ def run_native_text(task, app=None, max_steps=20):
 
         phone_state = get_phone_state(task=task)
         if not phone_state["elements"]:
-            print("Empty UI dump — retrying...")
+            print("Empty UI dump, retrying...")
             time.sleep(1)
             phone_state = get_phone_state(task=task)
 
@@ -929,7 +929,7 @@ def run_native_text(task, app=None, max_steps=20):
         )
 
         if repeat_count >= 4:
-            print(f"\n⚠️  Screen stuck for {repeat_count} steps — aborting to prevent runaway loop")
+            print(f"\n⚠️  Screen stuck for {repeat_count} steps, aborting to prevent runaway loop")
             break
 
         loop_state = {
@@ -946,7 +946,7 @@ def run_native_text(task, app=None, max_steps=20):
             print(f"LLM error: {e}")
             break
 
-        print(f"→ {action.get('action')} — {action.get('reason','')}")
+        print(f"→ {action.get('action')}, {action.get('reason','')}")
 
         a = action["action"]
         if a == "tap":
@@ -1094,7 +1094,7 @@ def run_browser(task, start_url=None, max_steps=20):
 
         ui_tree = snapshot(interactive_only=True)
         if not ui_tree:
-            print("Empty snapshot — re-forwarding CDP...")
+            print("Empty snapshot, re-forwarding CDP...")
             subprocess.run(
                 f"{ADB} forward tcp:9222 localabstract:chrome_devtools_remote",
                 shell=True, capture_output=True
@@ -1113,7 +1113,7 @@ def run_browser(task, start_url=None, max_steps=20):
             print(f"LLM error: {e}")
             break
 
-        print(f"→ {action.get('action')} {action.get('ref','')}{action.get('url','')}{action.get('text','')} — {action.get('reason','')}")
+        print(f"→ {action.get('action')} {action.get('ref','')}{action.get('url','')}{action.get('text','')}, {action.get('reason','')}")
 
         a = action["action"]
         if a == "click":
@@ -1160,7 +1160,7 @@ def run_native(task, app=None, max_steps=20):
         current_hash = hashlib.sha1(img[:512].encode()).hexdigest()[:12]
         repeat_count = repeat_count + 1 if current_hash == previous_hash else 0
         if repeat_count >= 4:
-            print(f"\n⚠️  Vision loop stuck {repeat_count} steps — aborting")
+            print(f"\n⚠️  Vision loop stuck {repeat_count} steps, aborting")
             break
         previous_hash = current_hash
 
@@ -1173,7 +1173,7 @@ def run_native(task, app=None, max_steps=20):
             print(f"LLM error: {e}")
             break
 
-        print(f"→ {action.get('action')} — {action.get('reason','')}")
+        print(f"→ {action.get('action')}, {action.get('reason','')}")
         a = action["action"]
         if a == "tap":
             tap(action["x"], action["y"])
