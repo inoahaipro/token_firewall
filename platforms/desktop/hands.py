@@ -9,14 +9,21 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 import core.config as cfg
 from core.hands.base import ActionResult
 
-# Reverse-DNS Android package id (e.g. com.spotify.music) -- CompositeHands
-# tries DesktopHands before RishPhoneHands, so without this check an
-# open_app resolved against the PHONE's package list (by
+# Reverse-DNS Android package id (e.g. com.spotify.music OR com.whatsapp) --
+# CompositeHands tries DesktopHands before RishPhoneHands, so without this
+# check an open_app resolved against the PHONE's package list (by
 # platforms/android/resolver.py) got claimed here first and DesktopHands
 # tried to exec a literal binary called "Spotify" on the PC, which doesn't
 # exist. Found live right after fixing the resolver itself -- same
 # claim-ordering bug as the clipboard one, different action type.
-_ANDROID_PKG_RE = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+){2,}$")
+#
+# Was `{2,}` (3+ segments minimum), which silently excluded real 2-segment
+# packages -- com.whatsapp, com.discord -- from ever matching, so THOSE
+# specifically still fell through to DesktopHands and failed the exact same
+# way Spotify used to. Found live via independent testing on another
+# instance: WhatsApp/Discord opens still broken after the "fix". `{1,}`
+# correctly covers both 2- and 3+-segment real package ids.
+_ANDROID_PKG_RE = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+){1,}$")
 
 class DesktopHands:
     @property
@@ -28,7 +35,15 @@ class DesktopHands:
             {"name":"clipboard_get", "description":"Read clipboard"},
             {"name":"clipboard_set", "description":"Write clipboard"},
             {"name":"open_app",      "description":"Open an application"},
-            {"name":"screenshot_adb","description":"Take a screenshot"},
+            # screenshot_adb deliberately NOT claimed here -- execute() below
+            # has no real implementation for it (there's no PC-side desktop
+            # screenshot path in this class), so claiming it just permanently
+            # blocked RishPhoneHands' real, working implementation and always
+            # returned "Unknown: screenshot_adb" instead. Found live via
+            # independent testing on another instance. A capabilities()
+            # entry with no matching execute() branch is exactly the
+            # claim-ordering bug class this file keeps hitting -- don't
+            # advertise what you can't do.
         ]
 
     def can_execute(self, action):

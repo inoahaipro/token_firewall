@@ -112,8 +112,28 @@ class RishPhoneHands:
                     capture_output=True, text=True, timeout=20)
                 return ActionResult(r.returncode == 0, "notification sent" if r.returncode == 0 else "", r.stderr.strip())
             if atype == "vibrate":
+                # `cmd vibrator vibrate` over rish/Shizuku hits "Can't find
+                # service: vibrator" -- that binder-level service isn't
+                # reachable from Shizuku's restricted context on this device.
+                # termux-vibrate is a real Termux:API command that doesn't
+                # need rish at all -- confirmed working directly over SSH.
+                # Found live: this action was advertised as supported but
+                # always failed.
                 dur = int(p.get("duration_ms", 500))
-                return self._rish(f"cmd vibrator vibrate {dur}")
+                r = subprocess.run(SSH_PHONE_CMD + [f"termux-vibrate -d {dur}"],
+                                    capture_output=True, text=True, timeout=15)
+                return ActionResult(r.returncode == 0, "vibrated" if r.returncode == 0 else "", r.stderr.strip())
+            if atype == "torch":
+                # Same story as vibrate above -- no rish `cmd` equivalent was
+                # ever implemented (fell through to the generic "not
+                # implemented on phone" error), and termux-torch is a plain
+                # Termux:API command that works without rish.
+                state = p.get("state", "on").strip().lower()
+                if state not in ("on", "off"):
+                    state = "on"
+                r = subprocess.run(SSH_PHONE_CMD + [f"termux-torch {state}"],
+                                    capture_output=True, text=True, timeout=15)
+                return ActionResult(r.returncode == 0, f"torch {state}" if r.returncode == 0 else "", r.stderr.strip())
             if atype == "battery_status":
                 r = self._rish("dumpsys battery")
                 if r.success:
@@ -135,7 +155,17 @@ class RishPhoneHands:
                 return self._rish(f"cmd clipboard set-primary-clip {text}")
             if atype == "open_app":
                 pkg = shlex.quote(p.get("package", ""))
-                return self._rish(f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
+                r = self._rish(f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
+                # `monkey` (via rish) dumps its own noisy arg-parsing debug
+                # preamble ("bash arg: -p\nbash arg: com.spotify.music...")
+                # ahead of the real result -- that was leaking straight
+                # through as the action's output instead of a clean
+                # confirmation, inconsistent with every other action here
+                # that formats its own result. Found live via independent
+                # testing on another instance.
+                if r.success:
+                    r.output = "Done -- app opened."
+                return r
             if atype == "close_app":
                 pkg = shlex.quote(p.get("package", ""))
                 return self._rish(f"am force-stop {pkg}")
