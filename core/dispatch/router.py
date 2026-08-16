@@ -18,6 +18,7 @@ v3 improvements over v2:
 """
 import json
 import re
+import threading
 import time
 import sys
 from dataclasses import dataclass, field
@@ -73,6 +74,13 @@ _GARBAGE = [
     "bash arg:","events injected:","java.lang.","activitynotfoundexception",
     "force finishing activity","does not exist","no activities found",
     "error type","exception occurred",
+    # Real execution failures -- caching these as if they were successful
+    # results meant a genuine bug (e.g. wrong action type for this
+    # platform) got permanently replayed from cache forever, even after
+    # the underlying code was fixed, since the stale cache entry never
+    # re-consulted the LLM.
+    "no hands claim action", "action failed.", "action failed",
+    "refused:", "is disabled.",
 ]
 _BARE_OK = {"ok","done",""}
 
@@ -120,6 +128,138 @@ def _extract_action(text: str) -> Optional[dict]:
                     except json.JSONDecodeError: pass
                     break
     return None
+
+# Real code-level guardrail against destructive shell commands. Found live:
+# nothing in the hands-execution path checked for this at all -- safety
+# depended entirely on the calling LLM choosing not to produce a destructive
+# action, with zero backstop if it did. This runs regardless of what
+# produced the command (LLM, cache replay, or a future caller), so a bad
+# cache entry or a jailbreak-y prompt can't silently execute something
+# destructive just because it got past the model once.
+#
+# First version was a single narrow regex and, on adversarial re-testing,
+# missed almost everything that wasn't the EXACT literal syntax it was
+# written for -- long-form flags (rm --recursive --force), RCE-via-pipe
+# (curl ... | bash), non-rm deletion (find -delete, shutil.rmtree),
+# security-disabling commands, chmod/chown wipeouts, arbitrary file
+# overwrite, git force-ops, and a generalized fork bomb. Rewritten to check
+# flag SEMANTICS (does this rm have recursive+force intent, regardless of
+# how the flags are spelled) rather than exact syntax, plus broader
+# category coverage. Still not exhaustive -- this is defense in depth on
+# top of the calling LLM's own judgment, not a substitute for it.
+_RM_INVOCATION_RE = re.compile(r"\brm\s+([^\n;|&]*)", re.I)
+
+
+def _rm_is_recursive_and_forced(args: str) -> bool:
+    recursive = force = False
+    for tok in args.split():
+        low = tok.lower()
+        if low in ("-r", "-R", "--recursive"):
+            recursive = True
+        elif low == "--force":
+            force = True
+        elif tok.startswith("-") and not tok.startswith("--") and len(tok) > 1:
+            letters = tok[1:].lower()
+            if "r" in letters:
+                recursive = True
+            if "f" in letters:
+                force = True
+    return recursive and force
+
+
+_DESTRUCTIVE_CMD_RE = re.compile(
+    r"\bmkfs\b|\bmkfs\.\w+\b"                    # format a filesystem
+    r"|\bdd\s+.*\bof=/dev/"                      # dd onto a raw device
+    r"|>\s*/dev/sd\w*\b"                         # overwrite a block device
+    r"|>\s*/etc/\S+|>\s*/boot/\S+"               # overwrite critical config/boot files
+    r"|\btruncate\s+-s\s*0\s+/(?:etc|boot)/"     # zero out critical files
+    r"|([\w:]+)\s*\(\)\s*\{\s*\1\s*\|\s*\1\s*&?\s*\}\s*;\s*\1"  # fork bomb, any function name (incl. classic ':')
+    r"|\bfactory\s*reset\b|wipe_data|erase_all_data"
+    r"|\bdrop\s+(table|database)\b"
+    r"|\bshred\b|\bwipefs\b"
+    r"|\b(curl|wget)\b[^\n;]*\|\s*(sudo\s+)?(bash|sh|zsh|python3?|perl|ruby)\b"  # RCE via pipe-to-shell
+    r"|\b(curl|wget)\b[^\n;]*\|\s*base64\b"      # RCE via pipe-to-base64-decode
+    r"|\bbase64\s+(-d|--decode)\b[^\n;]*\|\s*(sudo\s+)?(bash|sh|zsh|python3?|perl|ruby)\b"  # base64-smuggled payload piped to a shell
+    r"|\bfind\b[^\n;]*-delete\b"                 # find ... -delete
+    r"|\bfind\b[^\n;]*\|\s*xargs\s+rm\b"         # find | xargs rm
+    r"|\bfind\b[^\n;]*-exec\s+rm\b"              # find ... -exec rm {} \; / +
+    r"|shutil\.rmtree\("                         # python one-liner delete
+    r"|\bunlink\s*\(?\s*glob\s*\("                # perl bulk-delete via glob (paren after unlink optional)
+    r"|\bsetenforce\s+0\b|\biptables\s+-F\b|\bufw\s+disable\b"
+    r"|\bsystemctl\s+(stop|disable)\s+firewalld\b"
+    r"|enforcing.{0,10}disabled"                 # sed-editing selinux config, etc
+    r"|\bchmod\s+(-R\s+)?000\s+/(?:\s|home|etc|usr|var|$)"
+    r"|\bchown\s+-R\s+\S+\s+/(?:\s|$)"
+    r"|\bgit\s+push\s+[^\n;]*(-f\b|--force\b)"
+    r"|\bgit\s+reset\s+--hard\b"
+    r"|\bgit\s+clean\s+-[a-zA-Z]*f[a-zA-Z]*\b",
+    re.I,
+)
+
+# Python's own recursive-walk-and-delete pattern (os.walk + os.remove/rmdir/
+# unlink in the same one-liner) has no "rm"/"shutil.rmtree(" substring at
+# all, so it needs its own check rather than fitting the regex above.
+_PY_WALK_RE = re.compile(r"os\.walk\(", re.I)
+_PY_REMOVE_RE = re.compile(r"os\.(remove|unlink|rmdir)\(", re.I)
+
+
+_ACTION_META_KEYS = {"type", "description", "params", "steps"}
+
+
+def _normalize_action(action):
+    """LLM output for an action is inconsistent about whether payload
+    fields (message, text, cmd, title, content, etc) live nested under
+    "params" (the documented schema) or flat at the root. Found live: a
+    flat {"type":"toast","message":"X"} fired a REAL blank toast, because
+    every hands.execute() only ever reads action["params"]["message"] --
+    the root-level value was silently ignored, not an error, just empty
+    content sent to the device. Worse: the destructive-command guard reads
+    from the same params path, so a flat {"type":"run_command","cmd":"rm
+    -rf /"} would look like an empty, harmless command to it -- a genuine
+    guardrail bypass, not hypothetical, same root cause. Normalize once,
+    centrally, so every consumer sees one consistent shape regardless of
+    which way the LLM happened to format it that time."""
+    if not isinstance(action, dict):
+        return action
+    if action.get("type") == "workflow":
+        return {**action, "steps": [_normalize_action(s) for s in action.get("steps", [])]}
+    loose = {k: v for k, v in action.items() if k not in _ACTION_META_KEYS}
+    if not loose:
+        return action
+    params = dict(action.get("params") or {})
+    for k, v in loose.items():
+        params.setdefault(k, v)
+    return {**action, "params": params}
+
+
+def _is_destructive_command(cmd: str) -> bool:
+    cmd = cmd or ""
+    # $IFS / ${IFS} is bash's word-splitting variable, commonly substituted
+    # for a literal space specifically to dodge \s+-based regexes -- found
+    # live via adversarial testing ("rm${IFS}-rf${IFS}/tmp/x" evaded the
+    # original check). Normalize it to a real space before matching so the
+    # rest of the logic doesn't need to special-case it everywhere.
+    cmd = re.sub(r"\$\{?IFS\}?", " ", cmd)
+    for m in _RM_INVOCATION_RE.finditer(cmd):
+        if _rm_is_recursive_and_forced(m.group(1)):
+            return True
+    if _PY_WALK_RE.search(cmd) and _PY_REMOVE_RE.search(cmd):
+        return True
+    return bool(_DESTRUCTIVE_CMD_RE.search(cmd))
+
+
+# Query/get-type actions return data, not a fire-and-forget confirmation.
+# Falling back to a canned "Done." when these return empty output is
+# actively misleading (found live: "what's on my clipboard" -> "Done."
+# read as "I copied something" when nothing was actually retrieved).
+# Fire-and-forget actions (toast, tap, vibrate, etc) legitimately have
+# no output to show, so a confirmation string is correct for those --
+# just not for anything that's supposed to answer a question.
+_QUERY_TYPES = {
+    "clipboard_get", "battery_status", "wifi_info", "wifi_scan",
+    "location", "get_screen_state",
+}
+
 
 def _confirm(atype: str) -> str:
     return {
@@ -171,29 +311,52 @@ class FirewallRouter:
         self._cache_hits   = 0
         self._tokens_spent = 0
         self._tokens_saved = 0
-        self._history      = []
+        # Requests now genuinely run concurrently (offloaded to worker
+        # threads via asyncio.to_thread in server.py), so these counters --
+        # previously bare += on shared instance attributes -- need a lock
+        # to avoid lost updates under real concurrent access. Low severity
+        # (stats-only, not correctness-critical), fixed anyway while adding
+        # real concurrency made it a live possibility instead of dead code.
+        self._stats_lock = threading.Lock()
+
+    def _bump(self, requests=0, cache_hits=0, tokens_spent=0, tokens_saved=0):
+        with self._stats_lock:
+            self._requests     += requests
+            self._cache_hits   += cache_hits
+            self._tokens_spent += tokens_spent
+            self._tokens_saved += tokens_saved
 
     def route(self, prompt: str, history: list = None) -> Response:
-        self._requests += 1
-        self._history = history or []
+        self._bump(requests=1)
+        # history is threaded through as an explicit parameter, not stored as
+        # self._history. Found live under concurrency testing: this router is
+        # a single shared instance across all requests, and self._history was
+        # a plain attribute set at the top of route() then read again later
+        # in the same call -- if two requests ever genuinely interleave
+        # (multi-worker deployment, or converting these routes to sync def so
+        # Starlette's threadpool kicks in), request B's history would
+        # silently stomp request A's mid-flight, sending the wrong
+        # conversation history to the LLM. Currently masked only because this
+        # server happens to fully serialize requests today.
+        history = history or []
         intent = self.engine.process(prompt)
         if intent.kind == CHAIN and intent.sub_intents:
-            resp = self._route_chain(intent)
+            resp = self._route_chain(intent, history)
         else:
-            resp = self._route_one(intent)
+            resp = self._route_one(intent, history)
         self._log(intent, resp)
         return resp
 
-    def _route_chain(self, chain: Intent) -> Response:
+    def _route_chain(self, chain: Intent, history: list) -> Response:
         parts, total = [], 0
         for sub in chain.sub_intents:
-            r = self._route_one(sub)
+            r = self._route_one(sub, history)
             total += r.tokens_spent
             parts.append(r.content if r.source not in ("hands_error","llm_error") else f"[{sub.normalized}: failed]")
             time.sleep(0.3)
         return Response(" → ".join(parts), tokens_spent=total, source="chain")
 
-    def _route_one(self, intent: Intent) -> Response:
+    def _route_one(self, intent: Intent, history: list) -> Response:
         print(f"[ROUTE] {intent.kind} {intent.normalized!r}")
 
         if intent.kind == DEVICE:
@@ -201,7 +364,7 @@ class FirewallRouter:
             if entry:
                 r = self._exec_cached(entry, intent.fingerprint, intent.params)
                 if r is not None:
-                    self._cache_hits += 1; self._tokens_saved += 500
+                    self._bump(cache_hits=1, tokens_saved=500)
                     return r
 
             entry = self.store.fuzzy_lookup(intent.normalized)
@@ -224,7 +387,7 @@ class FirewallRouter:
                 print(f"[FUZZY] '{intent.normalized}' → {entry.action.get('type')}")
                 r = self._exec_cached(entry, None, intent.params)
                 if r is not None:
-                    self._cache_hits += 1; self._tokens_saved += 500
+                    self._bump(cache_hits=1, tokens_saved=500)
                     return r
 
             entry = self.store.semantic_lookup(intent.normalized)
@@ -234,33 +397,33 @@ class FirewallRouter:
             if entry:
                 r = self._exec_cached(entry, None, intent.params)
                 if r is not None:
-                    self._cache_hits += 1; self._tokens_saved += 500
+                    self._bump(cache_hits=1, tokens_saved=500)
                     return r
 
             if re.match(r"^(?:open|launch|start|run)\s+.+", intent.normalized, re.I):
                 r = self._try_open_unknown(intent.normalized)
                 if r is not None: return r
 
-            return self._call_llm(intent)
+            return self._call_llm(intent, history)
 
         # LEARNED / LLM
         if (not intent.cacheable
                 or _NO_CACHE_TIME.search(intent.normalized)
                 or _NO_CACHE_CREATIVE.search(intent.normalized)
                 or _NO_CACHE_CONVO.search(intent.normalized)):
-            return self._llm_passthrough(intent)
+            return self._llm_passthrough(intent, history)
 
         entry = self.store.lookup(intent.fingerprint)
         if entry:
             r = self._serve_cached_llm(entry)
-            self._cache_hits += 1; self._tokens_saved += 500
+            self._bump(cache_hits=1, tokens_saved=500)
             return r
 
         entry = self.store.fuzzy_lookup(intent.normalized)
         if entry and entry.action.get("type") == "llm_response":
             print(f"[FUZZY] '{intent.normalized}' → cached LLM")
             r = self._serve_cached_llm(entry)
-            self._cache_hits += 1; self._tokens_saved += 500
+            self._bump(cache_hits=1, tokens_saved=500)
             return r
 
         entry = self.store.semantic_lookup(intent.normalized)
@@ -269,10 +432,10 @@ class FirewallRouter:
             entry = None
         if entry:
             r = self._serve_cached_llm(entry)
-            self._cache_hits += 1; self._tokens_saved += 500
+            self._bump(cache_hits=1, tokens_saved=500)
             return r
 
-        return self._call_llm(intent)
+        return self._call_llm(intent, history)
 
     def _exec_cached(self, entry: CacheEntry, fp, params=None) -> Optional[Response]:
         action = _substitute(entry.action, params or {})
@@ -304,6 +467,12 @@ class FirewallRouter:
             from platforms.android.resolver import AppResolver
             r = AppResolver(); r.resolve()
             print(f"[RESOLVE] '{name}' in {len(r._installed)} packages")
+            if not r.query_ok:
+                return Response(
+                    f"Can't check whether '{name}' is installed -- ADB isn't reachable right now "
+                    "(phone disconnected/wireless adb dropped), not a real \"not found\".",
+                    source="device_search_unavailable",
+                )
             pkg = r.resolve_unknown(name)
             print(f"[RESOLVE] → {pkg}")
             if not pkg:
@@ -318,13 +487,13 @@ class FirewallRouter:
             import traceback; traceback.print_exc()
             return None
 
-    def _llm_passthrough(self, intent: Intent) -> Response:
+    def _llm_passthrough(self, intent: Intent, history: list) -> Response:
         try:
-            text, tokens = self.llm.complete(intent.raw, history=self._history)
+            text, tokens = self.llm.complete(intent.raw, history=history)
             tokens = int(tokens or 0)
         except Exception as e:
             return Response(f"LLM error: {e}", source="llm_error")
-        self._tokens_spent += tokens
+        self._bump(tokens_spent=tokens)
         # No-cache intents (time-sensitive/creative/convo) still deserve real
         # device-action execution if the LLM returned one -- only the caching
         # step should be skipped here, not the action-detection/execution step.
@@ -335,13 +504,13 @@ class FirewallRouter:
             return Response(content, tokens_spent=tokens, source="llm_action")
         return Response(text, tokens_spent=tokens, source="llm_passthrough")
 
-    def _call_llm(self, intent: Intent) -> Response:
+    def _call_llm(self, intent: Intent, history: list) -> Response:
         try:
-            text, tokens = self.llm.complete(intent.raw, history=self._history)
+            text, tokens = self.llm.complete(intent.raw, history=history)
             tokens = int(tokens or 0)
         except Exception as e:
             return Response(f"LLM error: {e}", source="llm_error")
-        self._tokens_spent += tokens
+        self._bump(tokens_spent=tokens)
         print(f"[LLM] {text[:80]!r}")
         action = _extract_action(text)
         if action:
@@ -368,9 +537,19 @@ class FirewallRouter:
         return Response(content, tokens_spent=tokens, source="llm_action")
 
     def _exec_hands(self, action) -> Response:
+        action = _normalize_action(action)
         atype = action.get("type","") if isinstance(action,dict) else ""
         if atype in cfg.DISABLED_ACTIONS:
             return Response(f"Action '{atype}' is disabled.", source="blocked")
+        if atype in ("adb_command", "run_command"):
+            cmd = action.get("params", {}).get("cmd", "") if isinstance(action, dict) else ""
+            if _is_destructive_command(cmd):
+                print(f"[BLOCKED] destructive command refused: {cmd!r}")
+                return Response(
+                    "Refused: that looks like a destructive command (data/device wipe). "
+                    "Not executing it. Ask again more specifically if this wasn't the intent.",
+                    source="blocked",
+                )
         if atype == "adb_command":
             cmd = action.get("params",{}).get("cmd","")
             action = {**action, "params":{**action.get("params",{}), "cmd":_fix_brightness(cmd)}}
@@ -378,7 +557,11 @@ class FirewallRouter:
         if not result.success:
             return Response(result.error or "Action failed.", source="hands_error")
         raw = (result.output or "").strip()
-        return Response(_format(atype, raw) if raw else _confirm(atype), source="hands")
+        if not raw:
+            if atype in _QUERY_TYPES:
+                return Response(f"[{atype} returned no data -- device may not have reported a value]", source="hands_error")
+            return Response(_confirm(atype), source="hands")
+        return Response(_format(atype, raw), source="hands")
 
     def _run_action(self, action) -> str:
         if isinstance(action, list):

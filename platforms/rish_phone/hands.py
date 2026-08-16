@@ -3,6 +3,7 @@ platforms/rish_phone/hands.py -- Android device control over SSH + rish,
 no ADB/USB required. rish gives adb-shell-equivalent access on-device via
 Shizuku; we reach it over the existing durable SSH tunnel to the phone.
 """
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -45,7 +46,17 @@ class RishPhoneHands:
         # rish needs -c "cmd" (like sh -c), RISH_APPLICATION_ID exported (only
         # lives in .bashrc, which non-interactive SSH won't source), and a
         # forced pseudo-tty (-tt on the ssh command) or it silently no-ops.
-        remote = f'export RISH_APPLICATION_ID=com.termux; ~/rish/rish -c "{cmd}"'
+        #
+        # cmd itself is shlex.quote()'d as a single opaque argument for the
+        # SSH/local-shell parse -- naive f-string double-quote wrapping here
+        # let a literal " in user-supplied text (e.g. a type_text/toast/
+        # clipboard message) close the outer quote early and inject
+        # arbitrary shell commands on the phone, confirmed live with a real
+        # (harmless) proof-of-concept before this fix. cmd's OWN embedded
+        # values must separately be shlex.quote()'d by the caller for rish's
+        # later internal sh -c interpretation -- see the per-action-type
+        # quoting below.
+        remote = f'export RISH_APPLICATION_ID=com.termux; ~/rish/rish -c {shlex.quote(cmd)}'
         try:
             r = subprocess.run(SSH_PHONE_CMD + [remote],
                                 capture_output=True, text=True, timeout=timeout)
@@ -60,23 +71,32 @@ class RishPhoneHands:
         p = action.get("params", {})
         try:
             if atype == "tap":
-                return self._rish(f"input tap {p['x']} {p['y']}")
+                x, y = int(p["x"]), int(p["y"])
+                return self._rish(f"input tap {x} {y}")
             if atype == "swipe":
-                dur = p.get("duration_ms", 300)
-                return self._rish(f"input swipe {p['x1']} {p['y1']} {p['x2']} {p['y2']} {dur}")
+                x1, y1, x2, y2 = int(p["x1"]), int(p["y1"]), int(p["x2"]), int(p["y2"])
+                dur = int(p.get("duration_ms", 300))
+                return self._rish(f"input swipe {x1} {y1} {x2} {y2} {dur}")
             if atype == "key_event":
-                code = _KEY_EVENTS.get(p.get("key", ""), p.get("key", ""))
+                raw_key = p.get("key", "")
+                code = _KEY_EVENTS.get(raw_key, raw_key)
+                if not str(code).isdigit():
+                    return ActionResult(False, error=f"unrecognized key: {raw_key!r}")
                 return self._rish(f"input keyevent {code}")
             if atype == "type_text":
-                text = p.get("text", "").replace(" ", "%s").replace("'", "")
-                return self._rish(f"input text '{text}'")
+                # shlex.quote (not the old blunt '.replace("'", "")') so the
+                # text survives rish's own internal sh -c interpretation
+                # as a fully literal argument, regardless of what characters
+                # it contains -- fixes a real shell-injection bug found live.
+                text = shlex.quote(p.get("text", "").replace(" ", "%s"))
+                return self._rish(f"input text {text}")
             if atype == "scroll_down":
                 return self._rish("input swipe 500 1400 500 400 300")
             if atype == "scroll_up":
                 return self._rish("input swipe 500 400 500 1400 300")
             if atype in ("screenshot_adb", "get_screen"):
                 path = p.get("path", "/sdcard/tf_screenshot.png")
-                r = self._rish(f"screencap -p {path}")
+                r = self._rish(f"screencap -p {shlex.quote(path)}")
                 if r.success:
                     r.output = f"Screenshot saved on phone at {path}"
                 return r
@@ -92,7 +112,7 @@ class RishPhoneHands:
                     capture_output=True, text=True, timeout=20)
                 return ActionResult(r.returncode == 0, "notification sent" if r.returncode == 0 else "", r.stderr.strip())
             if atype == "vibrate":
-                dur = p.get("duration_ms", 500)
+                dur = int(p.get("duration_ms", 500))
                 return self._rish(f"cmd vibrator vibrate {dur}")
             if atype == "battery_status":
                 r = self._rish("dumpsys battery")
@@ -111,13 +131,13 @@ class RishPhoneHands:
             if atype == "clipboard_get":
                 return self._rish("cmd clipboard get-primary-clip 2>/dev/null || service call clipboard 2")
             if atype == "clipboard_set":
-                text = p.get("text", "").replace("'", "")
-                return self._rish(f"cmd clipboard set-primary-clip '{text}'")
+                text = shlex.quote(p.get("text", ""))
+                return self._rish(f"cmd clipboard set-primary-clip {text}")
             if atype == "open_app":
-                pkg = p.get("package", "")
+                pkg = shlex.quote(p.get("package", ""))
                 return self._rish(f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
             if atype == "close_app":
-                pkg = p.get("package", "")
+                pkg = shlex.quote(p.get("package", ""))
                 return self._rish(f"am force-stop {pkg}")
             return ActionResult(False, error=f"not implemented on phone: {atype}")
         except Exception as e:

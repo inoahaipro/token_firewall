@@ -1,0 +1,32 @@
+[
+  {
+    "intent": "check wifi",
+    "action": {
+      "type": "wifi_info",
+      "description": "checking current wifi connection status",
+      "params": {}
+    },
+    "confidence": 1.0,
+    "platform": "linux"
+  },
+  {
+    "intent": "what's my battery",
+    "action": {
+      "type": "battery_status",
+      "description": "Check battery status",
+      "params": {}
+    },
+    "confidence": 1.0,
+    "platform": "linux"
+  },
+  {
+    "intent": "wifi status",
+    "action": {
+      "type": "wifi_info",
+      "description": "Get Wi-Fi status and connection info",
+      "params": {}
+    },
+    "confidence": 1.0,
+    "platform": "linux"
+  }
+]

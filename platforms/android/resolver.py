@@ -6,7 +6,31 @@ Handles OEM variants (Samsung vs Pixel vs OnePlus vs Xiaomi etc.)
 """
 import re
 import subprocess
+import threading
+import time
+from pathlib import Path
 from typing import Optional
+
+# Same SSH+rish channel platforms/rish_phone/hands.py uses for every other
+# phone action on this deployment. Found live: this resolver was the only
+# thing on the phone-control path still hardcoded to a raw `adb shell`
+# call, which this deployment runs with TF_DISABLE_ADB=true and no wired/
+# paired adb device -- so it always failed, even though the exact same
+# package list is trivially reachable over the SSH channel everything else
+# already uses successfully.
+_SSH_PHONE_CMD = [
+    "ssh", "-tt", "-p", "8022", "-i", str(Path.home() / ".ssh/id_ed25519_phone"),
+    "-o", "ConnectTimeout=8", "-o", "BatchMode=yes", "u0_a337@100.75.171.40",
+]
+
+
+def _list_packages_via_rish() -> Optional[str]:
+    remote = 'export RISH_APPLICATION_ID=com.termux; ~/rish/rish -c "pm list packages"'
+    try:
+        r = subprocess.run(_SSH_PHONE_CMD + [remote], capture_output=True, text=True, timeout=15)
+        return r.stdout if r.returncode == 0 else None
+    except Exception:
+        return None
 
 # Priority-ordered candidates. First installed one wins.
 _CANDIDATES = {
@@ -63,22 +87,74 @@ _CANDIDATES = {
 }
 
 
+# Module-level cache shared across AppResolver instances. Found live under
+# concurrent load: router.py builds a fresh AppResolver() and calls
+# resolve() on EVERY "open <app>" request, and with adb disabled that means
+# a live SSH round-trip listing 600+ packages every single time (~10-17s
+# observed) -- easily the single biggest contributor to requests timing out
+# the concurrency gate under any real burst. Installed apps change rarely
+# (a real install/uninstall, not something that happens minute to minute),
+# so cache a successful resolve for a good while -- an hour, not five
+# minutes; there's no push signal for "an app just got installed" so this
+# is a plain TTL, but there's no reason to pay the round-trip cost anywhere
+# near that often for something that changes this infrequently. Failures
+# are never cached -- a transient SSH/adb hiccup should retry fresh next
+# call, not lock in a false negative for the TTL.
+#
+# The lock is held across the ENTIRE fetch on a cache miss, not just the
+# read/write -- otherwise N concurrent requests that all see a stale cache
+# each kick off their own redundant ~10-17s round-trip (a thundering herd,
+# found while reviewing this after a burst test). Holding it means the
+# first caller does the one real fetch; everyone else blocks on the lock
+# and finds a warm cache the instant they acquire it, at the cost of only
+# ever running one resolve at a time -- an easy trade since the whole point
+# is that this should rarely run at all.
+_cache_lock = threading.Lock()
+_cache = {"resolved": None, "installed": None, "ts": 0.0}
+_CACHE_TTL_S = 3600
+
+
 class AppResolver:
 
     def __init__(self):
         self._resolved:  dict[str, str] = {}
         self._installed: set[str] = set()
+        # False whenever the device query itself failed (adb unreachable, no
+        # device attached, timeout) -- distinct from "queried fine, app just
+        # isn't in the list". Found live: a dropped wireless-adb connection
+        # made every "open <app>" request come back "Couldn't find X
+        # installed" for an app that WAS installed, with zero indication the
+        # check never actually ran. Callers must check this before treating
+        # an empty resolve() as a real negative.
+        self.query_ok = False
 
     def resolve(self) -> dict[str, str]:
         """Query device, build friendly name → package map."""
-        try:
-            r = subprocess.run(
-                ["adb", "shell", "pm", "list", "packages"],
-                capture_output=True, text=True, timeout=15,
-            )
-            if r.returncode != 0:
+        with _cache_lock:
+            if _cache["resolved"] is not None and time.time() - _cache["ts"] < _CACHE_TTL_S:
+                self._resolved  = _cache["resolved"]
+                self._installed = _cache["installed"]
+                self.query_ok = True
+                return self._resolved
+
+            output = None
+            try:
+                r = subprocess.run(
+                    ["adb", "shell", "pm", "list", "packages"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if r.returncode == 0:
+                    output = r.stdout
+            except Exception as e:
+                print(f"[RESOLVER] adb path failed: {e}")
+
+            if output is None:
+                output = _list_packages_via_rish()
+
+            if output is None:
                 return {}
-            for line in r.stdout.splitlines():
+            self.query_ok = True
+            for line in output.splitlines():
                 m = re.match(r"package:(.+)", line.strip())
                 if m:
                     self._installed.add(m.group(1).strip())
@@ -88,10 +164,12 @@ class AppResolver:
                         self._resolved[name] = pkg
                         break
             print(f"[RESOLVER] {len(self._installed)} packages, resolved {len(self._resolved)} names")
+
+            _cache["resolved"] = self._resolved
+            _cache["installed"] = self._installed
+            _cache["ts"] = time.time()
+
             return self._resolved
-        except Exception as e:
-            print(f"[RESOLVER] Failed: {e}")
-            return {}
 
     def get(self, name: str) -> Optional[str]:
         return self._resolved.get(name.lower())

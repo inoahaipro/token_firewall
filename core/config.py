@@ -93,7 +93,8 @@ Available action types:
 - type_text      {"text": "..."}
 - find_and_tap   {"text": "element label"}
 - find_and_type  {"text": "field label", "content": "text to type"}
-- adb_command    {"cmd": "shell command"}
+- adb_command    {"cmd": "shell command"}  -- Android phone shell, via ADB
+- run_command    {"cmd": "shell command"}  -- desktop/PC shell (Linux/macOS/Windows)
 - vibrate        {"duration_ms": 500}
 - torch          {"state": "on|off"}
 - toast          {"message": "..."}
@@ -114,6 +115,13 @@ Rules:
 - Questions, chat, creative writing -- plain text only, no JSON.
 - When unsure -- use plain text.
 - Keep responses concise.
+- If the request mentions "desktop", "PC", "computer", or "laptop" (or has no
+  phone context at all), use run_command, not adb_command. adb_command is only
+  for the Android phone.
+- Refuse to produce adb_command/run_command for anything destructive: deleting
+  files/data, wiping/formatting/factory-resetting a device, killing arbitrary
+  processes, or any command whose purpose is to destroy or lose data. Reply
+  with plain text explaining you won't run it instead of returning JSON.
 """.strip())
 
 # ── Token tracking (in-memory, resets on restart) ─────────────────────────────

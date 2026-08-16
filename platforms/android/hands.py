@@ -222,33 +222,39 @@ class AndroidHands:
 
         elif atype == "long_press":
             x, y = self._clamp(params.get("x",500), params.get("y",500))
-            dur   = params.get("duration_ms",1000)
+            dur   = int(params.get("duration_ms",1000))
             return self._adb(f"shell input swipe {x} {y} {x} {y} {dur}")
 
         elif atype == "swipe":
             x1,y1 = self._clamp(params.get("x1",500), params.get("y1",1400))
             x2,y2 = self._clamp(params.get("x2",500), params.get("y2",400))
-            dur    = params.get("duration_ms",300)
+            dur    = int(params.get("duration_ms",300))
             return self._adb(f"shell input swipe {x1} {y1} {x2} {y2} {dur}")
 
         elif atype == "type_text":
             text = params.get("text","")
             if not text:
                 return ActionResult(success=False, error="No text provided")
-            esc = text.replace(" ","%s").replace("'","\\'").replace('"','\\"').replace("&","\\&")
-            r = self._adb(f"shell input text '{esc}'")
+            # shlex.quote (not the old broken '.replace("'","\\'")' -- a
+            # backslash doesn't escape inside single quotes in POSIX sh, so
+            # that was never actually safe) so text survives the remote
+            # device shell as a fully literal argument regardless of content.
+            esc = shlex.quote(text.replace(" ","%s"))
+            r = self._adb(f"shell input text {esc}")
             return r if r.success else ActionResult(success=False, error=r.error)
 
         elif atype == "key_event":
             key  = params.get("key","home")
             code = _KEY.get(key.lower(), key)
+            if not str(code).isdigit():
+                return ActionResult(success=False, error=f"unrecognized key: {key!r}")
             return self._adb(f"shell input keyevent {code}")
 
         elif atype == "open_app":
             return self._open_app(params)
 
         elif atype == "close_app":
-            pkg = params.get("package","")
+            pkg = shlex.quote(params.get("package",""))
             return self._adb(f"shell am force-stop {pkg}")
 
         elif atype == "get_screen":
@@ -262,7 +268,7 @@ class AndroidHands:
 
         elif atype == "screenshot_adb":
             path = params.get("path","/sdcard/screenshot.png")
-            return self._adb(f"shell screencap -p {path}")
+            return self._adb(f"shell screencap -p {shlex.quote(path)}")
 
         elif atype == "scroll_down":
             w, h = self._dims()
@@ -280,7 +286,7 @@ class AndroidHands:
             return self._adb("shell dumpsys activity activities | grep mResumedActivity | head -1")
 
         elif atype == "install_apk":
-            return self._adb(f"install -r {params.get('path','')}")
+            return self._adb(f"install -r {shlex.quote(params.get('path',''))}")
 
         elif atype == "adb_command":
             cmd = params.get("cmd","").strip()
@@ -321,8 +327,8 @@ class AndroidHands:
                 self._adb(f"shell input tap {node[0]} {node[1]}")
                 time.sleep(0.3)
             content = params.get("content","")
-            esc = content.replace(" ","%s").replace("'","\\'")
-            return self._adb(f"shell input text '{esc}'")
+            esc = shlex.quote(content.replace(" ","%s"))
+            return self._adb(f"shell input text {esc}")
 
         elif atype == "find_and_scroll":
             direction = params.get("direction","down")
@@ -347,7 +353,7 @@ class AndroidHands:
         app_name = params.get("app_name","")
 
         if url:
-            return self._adb(f"shell am start -a android.intent.action.VIEW -d '{url}'")
+            return self._adb(f"shell am start -a android.intent.action.VIEW -d {shlex.quote(url)}")
 
         # Resolve friendly name to package if needed
         if pkg and "." not in pkg:
@@ -367,7 +373,7 @@ class AndroidHands:
 
         # Try resolve-activity for exact component
         component = None
-        res = self._adb(f"shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {pkg}")
+        res = self._adb(f"shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {shlex.quote(pkg)}")
         if res.success:
             for line in res.output.strip().splitlines():
                 line = line.strip()
@@ -376,19 +382,19 @@ class AndroidHands:
                     break
 
         if component:
-            r = self._adb(f"shell am start -n {component}")
+            r = self._adb(f"shell am start -n {shlex.quote(component)}")
             out = (r.output or "").lower()
             if r.success and "error" not in out and "unable" not in out:
                 return ActionResult(success=True, output=f"Opened {display}")
 
         # Fallback: MAIN/LAUNCHER intent
-        r2 = self._adb(f"shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER {pkg}")
+        r2 = self._adb(f"shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER {shlex.quote(pkg)}")
         out2 = (r2.output or "").lower()
         if r2.success and "error" not in out2 and "unable" not in out2:
             return ActionResult(success=True, output=f"Opened {display}")
 
         # Last resort: monkey
-        r3 = self._adb(f"shell monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
+        r3 = self._adb(f"shell monkey -p {shlex.quote(pkg)} -c android.intent.category.LAUNCHER 1")
         if r3.success:
             return ActionResult(success=True, output=f"Opened {display}")
 

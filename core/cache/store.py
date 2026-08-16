@@ -30,6 +30,33 @@ _SEMANTIC_ACTION_VERB_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Action types whose whole point IS the payload (the message/text itself),
+# not just "did this kind of thing happen." Found live: "send a toast saying
+# hi" fuzzy/semantic-matched a differently-worded prior toast request
+# ("...saying TF_INTEGRATION_TEST_G5") closely enough on surrounding phrasing
+# alone, and replayed that ENTIRE cached action -- including its old message
+# text -- instead of the new content. Similarity on the sentence around the
+# payload says nothing about whether the payload itself matches, so these
+# types must never be fuzzy/semantic-matched: only an exact fingerprint hit
+# (the literal same request, verbatim) is safe to replay from cache. A fresh
+# LLM call on anything else is the correct trade -- a stale message sent to
+# Noah is a real trust-breaking bug, a slightly lower cache-hit rate isn't.
+_CONTENT_BEARING_TYPES = {
+    "toast", "notify", "clipboard_set", "type_text", "find_and_type", "send_sms",
+}
+
+# Same vulnerability, different shape: llm_response entries cache an
+# arbitrary FREE-TEXT reply, not a status value -- the cached text IS the
+# payload, same as a toast message is. Found live minutes after the toast
+# fix: a confused LLM reply to a garbled request ("was a blank toast" ->
+# "It looks like your message got cut off...") got learned as llm_response,
+# then fuzzy-matched onto a completely unrelated later request ("toast
+# saying hey noah") on nothing but shared word overlap ("toast"), serving
+# a nonsense reply to a normal request. Same fix: exact repeat only.
+_FREE_TEXT_TYPES = {"llm_response"}
+
+_UNSAFE_TO_FUZZY_MATCH = _CONTENT_BEARING_TYPES | _FREE_TEXT_TYPES
+
 _SEMANTIC_THRESHOLD = 0.55
 _embed_model = None
 
@@ -119,11 +146,20 @@ class KnowledgeStore:
 
     def __init__(self):
         import sys
+        import threading
         sys.path.insert(0, str(Path(__file__).parents[2]))
         import core.config as cfg
         self._cfg   = cfg
         self._packs: list[CacheEntry] = []    # Tier 1
         self._db:    sqlite3.Connection = None
+        # check_same_thread=False only disables sqlite3's OWN safety check --
+        # it does NOT make one connection object safe to use from multiple
+        # threads concurrently without external locking. Found live under
+        # concurrent load: two requests hitting self._db at genuinely the
+        # same moment raised sqlite3.ProgrammingError("bad parameter or
+        # other API misuse"), the exact failure mode of an unlocked shared
+        # connection. Every self._db call in this class must hold this lock.
+        self._db_lock = threading.Lock()
         self._init_db()
         self._load_packs()
 
@@ -134,13 +170,14 @@ class KnowledgeStore:
         cfg.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(cfg.DB_PATH), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
-        self._db.executescript(_SCHEMA)
-        try:
-            self._db.execute("ALTER TABLE learned ADD COLUMN embedding BLOB")
+        with self._db_lock:
+            self._db.executescript(_SCHEMA)
+            try:
+                self._db.execute("ALTER TABLE learned ADD COLUMN embedding BLOB")
+                self._db.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
             self._db.commit()
-        except sqlite3.OperationalError:
-            pass  # column already exists
-        self._db.commit()
 
     def _load_packs(self):
         """Load platform + shared knowledge packs into Tier 1."""
@@ -195,25 +232,26 @@ class KnowledgeStore:
                 return entry
 
         # Tier 2 -- learned
-        row = self._db.execute(
-            "SELECT * FROM learned WHERE fingerprint = ?", (fp,)
-        ).fetchone()
-        if not row:
-            return None
+        with self._db_lock:
+            row = self._db.execute(
+                "SELECT * FROM learned WHERE fingerprint = ?", (fp,)
+            ).fetchone()
+            if not row:
+                return None
 
-        # Staleness check
-        stale = time.time() - self._cfg.STALE_DAYS * 86400
-        if row["last_used"] < stale:
-            return None
+            # Staleness check
+            stale = time.time() - self._cfg.STALE_DAYS * 86400
+            if row["last_used"] < stale:
+                return None
 
-        if row["confidence"] < self._cfg.CACHE_THRESHOLD:
-            return None
+            if row["confidence"] < self._cfg.CACHE_THRESHOLD:
+                return None
 
-        self._db.execute(
-            "UPDATE learned SET hits = hits+1, last_used = ? WHERE fingerprint = ?",
-            (int(time.time()), fp),
-        )
-        self._db.commit()
+            self._db.execute(
+                "UPDATE learned SET hits = hits+1, last_used = ? WHERE fingerprint = ?",
+                (int(time.time()), fp),
+            )
+            self._db.commit()
 
         return CacheEntry(
             fingerprint=row["fingerprint"],
@@ -235,6 +273,8 @@ class KnowledgeStore:
         for entry in self._packs:
             if not entry.intent_text:
                 continue
+            if entry.action.get("type") in _UNSAFE_TO_FUZZY_MATCH:
+                continue
             score = _similarity(query, entry.intent_text)
             threshold = cfg.FUZZY_THRESHOLD_APP if entry.action.get("type") == "open_app" else cfg.FUZZY_THRESHOLD
             if score > best_score and score >= threshold:
@@ -243,21 +283,26 @@ class KnowledgeStore:
 
         # Search Tier 2
         try:
-            rows = self._db.execute("SELECT * FROM learned").fetchall()
+            with self._db_lock:
+                rows = self._db.execute("SELECT * FROM learned").fetchall()
             for row in rows:
+                try:
+                    action = json.loads(row["action_json"])
+                except Exception:
+                    continue
+                if action.get("type") in _UNSAFE_TO_FUZZY_MATCH:
+                    continue
                 text = row["intent_text"] or ""
                 if not text:
-                    try:
-                        aj = json.loads(row["action_json"])
-                        text = aj.get("original_prompt", aj.get("description", ""))
-                    except Exception:
+                    text = action.get("original_prompt", action.get("description", ""))
+                    if not text:
                         continue
                 score = _similarity(query, text)
                 if score > best_score and score >= cfg.FUZZY_THRESHOLD:
                     best_score = score
                     best_entry = CacheEntry(
                         fingerprint=row["fingerprint"],
-                        action=json.loads(row["action_json"]),
+                        action=action,
                         confidence=row["confidence"],
                         platform=row["platform"],
                         hits=row["hits"],
@@ -279,17 +324,18 @@ class KnowledgeStore:
         except Exception as e:
             print(f"[EMBED] failed for {intent_text!r}: {e}")
             emb_bytes = None
-        self._db.execute("""
-            INSERT INTO learned (fingerprint, intent_text, action_json, confidence, platform, hits, learned_at, last_used, embedding)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
-            ON CONFLICT(fingerprint) DO UPDATE SET
-                action_json = excluded.action_json,
-                confidence  = excluded.confidence,
-                hits        = hits + 1,
-                last_used   = excluded.last_used,
-                embedding   = COALESCE(excluded.embedding, learned.embedding)
-        """, (fp, intent_text, json.dumps(action), confidence, platform, now, now, emb_bytes))
-        self._db.commit()
+        with self._db_lock:
+            self._db.execute("""
+                INSERT INTO learned (fingerprint, intent_text, action_json, confidence, platform, hits, learned_at, last_used, embedding)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT(fingerprint) DO UPDATE SET
+                    action_json = excluded.action_json,
+                    confidence  = excluded.confidence,
+                    hits        = hits + 1,
+                    last_used   = excluded.last_used,
+                    embedding   = COALESCE(excluded.embedding, learned.embedding)
+            """, (fp, intent_text, json.dumps(action), confidence, platform, now, now, emb_bytes))
+            self._db.commit()
 
     def semantic_lookup(self, query: str) -> Optional[CacheEntry]:
         """Embedding-similarity match across learned entries. Safety-gated:
@@ -306,10 +352,16 @@ class KnowledgeStore:
             return None
 
         best_score, best_row = 0.0, None
-        rows = self._db.execute(
-            "SELECT * FROM learned WHERE embedding IS NOT NULL"
-        ).fetchall()
+        with self._db_lock:
+            rows = self._db.execute(
+                "SELECT * FROM learned WHERE embedding IS NOT NULL"
+            ).fetchall()
         for row in rows:
+            try:
+                if json.loads(row["action_json"]).get("type") in _UNSAFE_TO_FUZZY_MATCH:
+                    continue
+            except Exception:
+                continue
             cached_emb = np.frombuffer(row["embedding"], dtype="float32")
             score = _cosine(q_emb, cached_emb)
             if score > best_score:
@@ -319,11 +371,12 @@ class KnowledgeStore:
             return None
 
         print(f"[SEMANTIC] {query!r} → {best_row['intent_text']!r} (score={best_score:.3f})")
-        self._db.execute(
-            "UPDATE learned SET hits = hits+1, last_used = ? WHERE fingerprint = ?",
-            (int(time.time()), best_row["fingerprint"]),
-        )
-        self._db.commit()
+        with self._db_lock:
+            self._db.execute(
+                "UPDATE learned SET hits = hits+1, last_used = ? WHERE fingerprint = ?",
+                (int(time.time()), best_row["fingerprint"]),
+            )
+            self._db.commit()
         return CacheEntry(
             fingerprint=best_row["fingerprint"],
             action=json.loads(best_row["action_json"]),
@@ -336,17 +389,19 @@ class KnowledgeStore:
 
     def evict(self, fp: str):
         """Remove a bad entry."""
-        self._db.execute("DELETE FROM learned WHERE fingerprint = ?", (fp,))
-        self._db.commit()
+        with self._db_lock:
+            self._db.execute("DELETE FROM learned WHERE fingerprint = ?", (fp,))
+            self._db.commit()
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def stats(self) -> dict:
         try:
-            learned = self._db.execute("SELECT COUNT(*) FROM learned").fetchone()[0]
-            top = self._db.execute(
-                "SELECT intent_text, hits FROM learned ORDER BY hits DESC LIMIT 5"
-            ).fetchall()
+            with self._db_lock:
+                learned = self._db.execute("SELECT COUNT(*) FROM learned").fetchone()[0]
+                top = self._db.execute(
+                    "SELECT intent_text, hits FROM learned ORDER BY hits DESC LIMIT 5"
+                ).fetchall()
             return {
                 "pack_entries":    len(self._packs),
                 "learned_entries": learned,

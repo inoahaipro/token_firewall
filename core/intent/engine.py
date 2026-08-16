@@ -7,6 +7,7 @@ Intent types:
   LLM     -- needs live reasoning
   CHAIN   -- multiple intents joined by "then", "and then", etc.
 """
+import difflib
 import re
 import sys
 from dataclasses import dataclass, field
@@ -63,7 +64,7 @@ _DEVICE_KW = {
         "camera", "photo", "picture", "screenshot", "record", "video",
         # controls
         "flashlight", "torch", "volume", "brightness", "dim", "loud", "quiet",
-        "mute", "silent", "ring", "notification",
+        "mute", "silent", "ring", "notification", "toast", "notify", "alert",
         # sensors / location
         "vibrate", "shake", "gps", "location", "coordinates",
         # navigation / UI
@@ -124,6 +125,47 @@ _ACTION_VERB_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Typo tolerance: local, zero-token, no LLM call. Corrects garbled words
+# against the vocabulary TF actually cares about (device keywords + common
+# command verbs) BEFORE keyword/canonical matching runs, so e.g. "chek my
+# batery" still classifies and caches the same as "check my battery"
+# instead of falling through to a real LLM call every time.
+_TYPO_VOCAB = set()
+for _lst in _DEVICE_KW.values():
+    for _kw in _lst:
+        _TYPO_VOCAB.update(_kw.split())
+for _kw in _LLM_KW:
+    _TYPO_VOCAB.update(_kw.split())
+_TYPO_VOCAB.update({"check", "get", "show", "tell", "whats", "status", "please", "send"})
+_TYPO_VOCAB = {w for w in _TYPO_VOCAB if len(w) >= 4}  # short words are too ambiguous to safely correct
+
+
+# "open/launch/start/run <name>" -- the <name> is an app name, not a device
+# keyword, and app names routinely collide with the vocab by pure string
+# similarity (spotify~notify, chrome~home, clock~lock, maps~apps,
+# whatsapp~whats). Found live: _try_open_unknown's own app resolver already
+# does its own fuzzy substring search on the raw name, so typo-correcting
+# the name here only pre-corrupts it before that resolver ever sees it.
+# Matches router.py's own _try_open_unknown verb set exactly.
+_OPEN_TARGET_RE = re.compile(r"^(open|launch|start|run)\s+(.+)$", re.I)
+
+
+def _typo_correct(norm: str) -> str:
+    m = _OPEN_TARGET_RE.match(norm)
+    if m:
+        # target name is left untouched -- resolver does its own fuzzy match
+        return f"{m.group(1)} {m.group(2)}"
+    words = norm.split()
+    out = []
+    for w in words:
+        core = w.strip(".,!?'\"")
+        if len(core) < 4 or core in _TYPO_VOCAB:
+            out.append(w)
+            continue
+        match = difflib.get_close_matches(core, _TYPO_VOCAB, n=1, cutoff=0.75)
+        out.append(match[0] if match else w)
+    return " ".join(out)
+
 
 def _canonical_status_fp(norm: str, platform: str) -> Optional[str]:
     if _ACTION_VERB_RE.search(norm):
@@ -132,6 +174,33 @@ def _canonical_status_fp(norm: str, platform: str) -> Optional[str]:
         if any(kw in norm for kw in keywords):
             return fingerprint(f"__status__{canonical}", platform)
     return None
+
+
+# Content-bearing requests (toast/notify/clipboard/type) can't safely
+# fuzzy-match on the whole phrase (that's what let "saying hi" replay a
+# completely different cached message once) -- but keying the EXACT cache
+# on the extracted payload itself, ignoring incidental surrounding wording,
+# is both safe AND useful: "send a toast saying hi" and "send another toast
+# saying hi" carry the identical actual content, so there's no reason the
+# second one should cost real tokens just because the framing words around
+# "hi" differ. Different content still gets a genuinely different
+# fingerprint -- this only helps when the payload itself repeats.
+_CONTENT_MESSAGE_RE = re.compile(
+    r"(?:toast|notif\w*|clipboard|type)\w*\b.*?"
+    r"(?:saying|says|say|reading|with the (?:word|text|message)|to say|that says|what says)\s+"
+    r"(.+?)\.?$",
+    re.IGNORECASE,
+)
+
+
+def _canonical_content_fp(norm: str, platform: str) -> Optional[str]:
+    m = _CONTENT_MESSAGE_RE.search(norm)
+    if not m:
+        return None
+    content = m.group(1).strip()
+    if not content:
+        return None
+    return fingerprint(f"__content__{content}", platform)
 
 
 # Queries that must never be cached (time-sensitive / creative / conversational)
@@ -191,7 +260,7 @@ class IntentEngine:
         return [p for p in parts if p.strip().lower() not in connectors and p.strip()]
 
     def _classify(self, text: str) -> Intent:
-        norm = text.lower().strip()
+        norm = _typo_correct(text.lower().strip())
         template, params = _extract_param(norm)
         fp = fingerprint(template, self.platform)
         cacheable = not bool(_NO_CACHE.search(norm))
@@ -204,7 +273,7 @@ class IntentEngine:
         device_keys = _DEVICE_KW.get("mobile", []) + _DEVICE_KW.get("desktop", []) + _DEVICE_KW.get("shared", [])
 
         if any(kw in norm for kw in device_keys):
-            canonical_fp = _canonical_status_fp(norm, self.platform)
+            canonical_fp = _canonical_content_fp(norm, self.platform) or _canonical_status_fp(norm, self.platform)
             return Intent(raw=text, normalized=norm, kind=DEVICE,
                           fingerprint=canonical_fp or fp, platform=self.platform,
                           params=params, cacheable=cacheable)

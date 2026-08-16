@@ -10,6 +10,7 @@ Fixes vs previous:
   - Conversation memory: last N messages passed to LLM
   - Auto-promote high-hit entries on each request
 """
+import asyncio
 import json
 import time
 import sys
@@ -103,6 +104,20 @@ llm    = LLMAdapter()
 router = FirewallRouter(store, engine, hands, llm)
 
 app = FastAPI(title="Token Firewall", version="3.0", docs_url=None, redoc_url=None)
+
+# router.route() is fully synchronous blocking I/O (SQLite, subprocess SSH
+# calls, LLM HTTP requests) called from an async route with no thread
+# offload, so it fully blocks the single event loop for the whole call --
+# every request already serializes in practice. Found live under stress
+# testing: a burst of concurrent requests queued up unbounded, 40% of a
+# 10-request burst silently timed out client-side (each request waiting
+# behind however many arrived before it), and the process was SIGKILLed
+# once during the test window. This doesn't add real parallelism (that
+# would need a bigger async/threading rework) -- it caps how many requests
+# get admitted to the queue at all, so excess load gets a fast, honest 503
+# instead of hanging past the caller's own timeout with no explanation.
+_REQUEST_GATE = asyncio.Semaphore(3)
+_GATE_WAIT_S = 5
 
 
 # ── Prompt + history extraction ───────────────────────────────────────────────
@@ -227,7 +242,11 @@ async def health():
     adb_ok = termux_ok = False
     try:
         r = subprocess.run(["adb","devices"], capture_output=True, text=True, timeout=3)
-        adb_ok = "device" in r.stdout
+        # adb devices' own header is "List of devices attached", which
+        # contains the substring "device" even with zero devices connected --
+        # a plain `"device" in stdout` check is always true. Match an actual
+        # device line instead (format: "SERIAL\tdevice").
+        adb_ok = bool(re.search(r"\t(device)\b", r.stdout))
     except Exception: pass
     try:
         r = subprocess.run(["termux-battery-status"], capture_output=True, text=True, timeout=3)
@@ -288,11 +307,27 @@ async def completions(request: Request):
     print(f"[REQ] stream={stream} msgs={len(messages)} {prompt[:60]!r}")
 
     try:
-        # Pass conversation history to router for LLM context
-        result = router.route(prompt, history=history)
+        await asyncio.wait_for(_REQUEST_GATE.acquire(), timeout=_GATE_WAIT_S)
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            {"error": "too many concurrent requests, try again shortly"},
+            status_code=503,
+        )
+    try:
+        # Offloaded to a worker thread -- router.route() is fully
+        # synchronous blocking I/O (SQLite, subprocess SSH, LLM HTTP calls).
+        # Calling it directly here blocks the WHOLE event loop for the
+        # entire request, which meant no other coroutine -- including the
+        # request-gate's own timeout timer above -- could run until it
+        # finished. Found live: that's why the gate did nothing under real
+        # concurrent load; the event loop was too wedged to ever notice a
+        # timeout. to_thread() actually frees the loop to stay responsive.
+        result = await asyncio.to_thread(router.route, prompt, history)
     except Exception as e:
         traceback.print_exc()
         return JSONResponse({"error":str(e)}, status_code=500)
+    finally:
+        _REQUEST_GATE.release()
 
     content = str(result.content or "")
     print(f"[RESP] source={result.source} tokens={result.tokens_spent} {content[:60]!r}")
@@ -309,10 +344,17 @@ async def completions(request: Request):
         "created": int(time.time()),
         "model":   "token-firewall",
         "choices": [{"index":0,"message":{"role":"assistant","content":content},"finish_reason":"stop"}],
+        # result.tokens_spent is already a real token count reported by the
+        # LLM provider when a real call happened (adapters/llm.py reads it
+        # straight from the API's own usage.total_tokens), and genuinely 0
+        # on a cache hit -- no LLM call, no tokens spent. Adding
+        # len(content.split()) on top was padding an already-real number
+        # with a fake word count, which is why cache hits showed "2 tokens"
+        # instead of the true 0.
         "usage":   {
             "prompt_tokens":     result.tokens_spent,
-            "completion_tokens": len(content.split()),
-            "total_tokens":      result.tokens_spent + len(content.split()),
+            "completion_tokens": result.tokens_spent,
+            "total_tokens":      result.tokens_spent,
         },
     }
 
@@ -337,8 +379,16 @@ async def tool_execute(request: Request):
             return {"success":True, "output":result.content, "source":result.source}
         return JSONResponse({"error":"action or prompt required"}, status_code=400)
 
-    result = hands.execute(action)
-    return {"success":result.success, "output":result.output or result.error}
+    # Route through the router's _exec_hands, not hands.execute() directly --
+    # calling hands directly here completely bypassed the destructive-command
+    # guardrail and the TF_DISABLE_ACTIONS check, both of which only live in
+    # _exec_hands. Found live during a security review: this endpoint is
+    # explicitly documented as "for MCP tool calls and OpenClaw agent use",
+    # i.e. exactly the path an AI assistant's tool layer would hit, so
+    # bypassing the guard here defeated it entirely regardless of what got
+    # fixed in the router.
+    result = router._exec_hands(action)
+    return {"success": result.source not in ("hands_error", "blocked"), "output": result.content, "source": result.source}
 
 
 @app.post("/v1/ui-find")
@@ -418,7 +468,17 @@ async def export_pack(request: Request):
     except Exception:
         body = {}
     min_hits = int(body.get("min_hits", 5))
-    output = Path(body.get("output", f"packs/{cfg.PLATFORM}/exported.json"))
+    # The requested output path is unvalidated user input -- constrain it to
+    # stay inside packs/, resolving any ../ traversal or absolute-path
+    # attempt first. Found live during a security review: this was an
+    # arbitrary-file-write primitive (any path, parent dirs auto-created,
+    # content is DB-derived JSON but the DESTINATION was fully attacker-
+    # controlled -- e.g. could target ~/.ssh/authorized_keys).
+    packs_base = (Path(__file__).resolve().parent / "packs").resolve()
+    requested = body.get("output", f"{cfg.PLATFORM}/exported.json")
+    output = (packs_base / requested).resolve()
+    if packs_base not in output.parents and output != packs_base:
+        return JSONResponse({"error": "output path must stay inside packs/"}, status_code=400)
     try:
         rows = store._db.execute(
             "SELECT * FROM learned WHERE hits >= ? ORDER BY hits DESC",
