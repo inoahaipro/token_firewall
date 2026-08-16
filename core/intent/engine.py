@@ -108,6 +108,16 @@ _CHAIN_SPLITTER = re.compile(
     re.IGNORECASE,
 )
 
+# Real chain commands are short and dense with imperative verbs -- "turn on
+# wifi then send a toast saying dinner's ready" is 10 words for a genuine
+# 2-step command. Narrated/conversational sentences run longer with mostly
+# non-command filler. See process()'s use of this for the full rationale.
+# 10, not 11 -- an 11-word narrative sentence ("Screen went black and froze
+# for a minute. Then came back.") still reproduced the bug at the original
+# threshold; verified 10 is the highest value that both blocks that case
+# and still lets the 10-word legit-chain example through.
+_LONG_MESSAGE_WORDS = 10
+
 # Simple no-parameter status checks: ANY phrasing containing these keywords
 # (and no "set/turn/change" verb implying a different action) maps to the SAME
 # canonical fingerprint. Without this, "check battery" and "what's my battery"
@@ -151,6 +161,14 @@ _OPEN_TARGET_RE = re.compile(r"^(open|launch|start|run)\s+(.+)$", re.I)
 
 
 def _typo_correct(norm: str) -> str:
+    # Guard directly here, not just at the classification level above --
+    # this function's output also becomes Intent.normalized, which callers
+    # downstream (cache lookups, the actual upstream LLM prompt on a miss)
+    # can use verbatim. Skipping device classification for long messages
+    # doesn't help if the mangled text still leaks through as what gets
+    # sent to the LLM or cached under.
+    if len(norm.split()) > _LONG_MESSAGE_WORDS:
+        return norm
     m = _OPEN_TARGET_RE.match(norm)
     if m:
         # target name is left untouched -- resolver does its own fuzzy match
@@ -235,6 +253,24 @@ class IntentEngine:
 
     def process(self, text: str) -> Intent:
         text = self._clean(text)
+
+        # Long messages skip chain-splitting AND device-keyword classification
+        # entirely, straight to LLM handling. Found live: "my screen went dark
+        # and froze for a minute then came back" -- a plain narrated sentence,
+        # not a command -- got split on "then" into two fragments ("...for a
+        # minute" / "came back"), each short enough that typo-correction (see
+        # _typo_correct) mangled them into "mute"/"camera", and BOTH still
+        # would have classified as real device intents even without that,
+        # since _classify's device check is a bare substring match against
+        # ~60 keywords with zero structural awareness -- "screen" alone is
+        # one of them. Real chain commands ("turn on wifi then send a toast")
+        # are short and dense with imperative verbs; narrated sentences run
+        # longer and are mostly non-command filler. A real LLM call correctly
+        # tells these apart; the free local classifier can't, so past this
+        # length it shouldn't guess.
+        if len(text.split()) > _LONG_MESSAGE_WORDS:
+            return self._classify(text.strip(), skip_device_kw=True)
+
         parts = self._split_chain(text)
 
         if len(parts) > 1:
@@ -259,7 +295,7 @@ class IntentEngine:
         connectors = {c.lower() for c in _CHAIN_SPLITTER.findall(text)}
         return [p for p in parts if p.strip().lower() not in connectors and p.strip()]
 
-    def _classify(self, text: str) -> Intent:
+    def _classify(self, text: str, skip_device_kw: bool = False) -> Intent:
         norm = _typo_correct(text.lower().strip())
         template, params = _extract_param(norm)
         fp = fingerprint(template, self.platform)
@@ -272,7 +308,7 @@ class IntentEngine:
         # never classify as DEVICE at all when TF runs on the PC.
         device_keys = _DEVICE_KW.get("mobile", []) + _DEVICE_KW.get("desktop", []) + _DEVICE_KW.get("shared", [])
 
-        if any(kw in norm for kw in device_keys):
+        if not skip_device_kw and any(kw in norm for kw in device_keys):
             canonical_fp = _canonical_content_fp(norm, self.platform) or _canonical_status_fp(norm, self.platform)
             return Intent(raw=text, normalized=norm, kind=DEVICE,
                           fingerprint=canonical_fp or fp, platform=self.platform,
