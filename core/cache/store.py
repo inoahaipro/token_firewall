@@ -31,28 +31,28 @@ _SEMANTIC_ACTION_VERB_RE = re.compile(
 )
 
 # Action types whose whole point IS the payload (the message/text itself),
-# not just "did this kind of thing happen." Found live: "send a toast saying
-# hi" fuzzy/semantic-matched a differently-worded prior toast request
-# ("...saying TF_INTEGRATION_TEST_G5") closely enough on surrounding phrasing
-# alone, and replayed that ENTIRE cached action -- including its old message
-# text -- instead of the new content. Similarity on the sentence around the
-# payload says nothing about whether the payload itself matches, so these
-# types must never be fuzzy/semantic-matched: only an exact fingerprint hit
-# (the literal same request, verbatim) is safe to replay from cache. A fresh
-# LLM call on anything else is the correct trade -- a stale message sent to
-# Noah is a real trust-breaking bug, a slightly lower cache-hit rate isn't.
+# not just "did this kind of thing happen." "Send a toast saying hi" once
+# fuzzy/semantic-matched a differently-worded prior toast request ("...saying
+# TF_INTEGRATION_TEST_G5") closely enough on surrounding phrasing alone, and
+# replayed that ENTIRE cached action -- including its old message text --
+# instead of the new content. Similarity on the sentence around the payload
+# says nothing about whether the payload itself matches, so these types must
+# never be fuzzy/semantic-matched: only an exact fingerprint hit (the
+# literal same request, verbatim) is safe to replay from cache. A fresh LLM
+# call on anything else is the right trade -- a stale message sent to Noah
+# is a real trust-breaking bug, a slightly lower cache-hit rate isn't.
 _CONTENT_BEARING_TYPES = {
     "toast", "notify", "clipboard_set", "type_text", "find_and_type", "send_sms",
 }
 
 # Same vulnerability, different shape: llm_response entries cache an
 # arbitrary FREE-TEXT reply, not a status value -- the cached text IS the
-# payload, same as a toast message is. Found live minutes after the toast
-# fix: a confused LLM reply to a garbled request ("was a blank toast" ->
+# payload, same as a toast message is. Turned up minutes after the toast fix
+# above: a confused LLM reply to a garbled request ("was a blank toast" ->
 # "It looks like your message got cut off...") got learned as llm_response,
 # then fuzzy-matched onto a completely unrelated later request ("toast
-# saying hey noah") on nothing but shared word overlap ("toast"), serving
-# a nonsense reply to a normal request. Same fix: exact repeat only.
+# saying hey noah") on nothing but shared word overlap ("toast"), serving a
+# nonsense reply to a normal request. Same fix -- exact repeat only.
 _FREE_TEXT_TYPES = {"llm_response"}
 
 _UNSAFE_TO_FUZZY_MATCH = _CONTENT_BEARING_TYPES | _FREE_TEXT_TYPES
@@ -154,11 +154,12 @@ class KnowledgeStore:
         self._db:    sqlite3.Connection = None
         # check_same_thread=False only disables sqlite3's OWN safety check --
         # it does NOT make one connection object safe to use from multiple
-        # threads concurrently without external locking. Found live under
-        # concurrent load: two requests hitting self._db at genuinely the
+        # threads concurrently without external locking. Under real
+        # concurrent load, two requests hitting self._db at genuinely the
         # same moment raised sqlite3.ProgrammingError("bad parameter or
-        # other API misuse"), the exact failure mode of an unlocked shared
-        # connection. Every self._db call in this class must hold this lock.
+        # other API misuse") -- exactly the failure mode of an unlocked
+        # shared connection. Every self._db call in this class needs to
+        # hold this lock.
         self._db_lock = threading.Lock()
         self._init_db()
         self._load_packs()

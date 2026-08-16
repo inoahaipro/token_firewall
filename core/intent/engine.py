@@ -143,10 +143,10 @@ _TYPO_VOCAB = {w for w in _TYPO_VOCAB if len(w) >= 4}  # short words are too amb
 # "open/launch/start/run <name>" -- the <name> is an app name, not a device
 # keyword, and app names routinely collide with the vocab by pure string
 # similarity (spotify~notify, chrome~home, clock~lock, maps~apps,
-# whatsapp~whats). Found live: _try_open_unknown's own app resolver already
-# does its own fuzzy substring search on the raw name, so typo-correcting
-# the name here only pre-corrupts it before that resolver ever sees it.
-# Matches router.py's own _try_open_unknown verb set exactly.
+# whatsapp~whats). _try_open_unknown's own app resolver already does its own
+# fuzzy substring search on the raw name, so typo-correcting the name here
+# only pre-corrupts it before that resolver ever sees it. Matches router.py's
+# own _try_open_unknown verb set exactly.
 _OPEN_TARGET_RE = re.compile(r"^(open|launch|start|run)\s+(.+)$", re.I)
 
 

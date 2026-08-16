@@ -12,12 +12,11 @@ from pathlib import Path
 from typing import Optional
 
 # Same SSH+rish channel platforms/rish_phone/hands.py uses for every other
-# phone action on this deployment. Found live: this resolver was the only
-# thing on the phone-control path still hardcoded to a raw `adb shell`
-# call, which this deployment runs with TF_DISABLE_ADB=true and no wired/
-# paired adb device -- so it always failed, even though the exact same
-# package list is trivially reachable over the SSH channel everything else
-# already uses successfully.
+# phone action on this deployment. This resolver was the one thing on the
+# phone-control path still hardcoded to a raw `adb shell` call -- and this
+# deployment runs with TF_DISABLE_ADB=true and no wired/paired adb device,
+# so it always failed, even though the exact same package list is trivially
+# reachable over the SSH channel everything else already uses.
 _SSH_PHONE_CMD = [
     "ssh", "-tt", "-p", "8022", "-i", str(Path.home() / ".ssh/id_ed25519_phone"),
     "-o", "ConnectTimeout=8", "-o", "BatchMode=yes", "u0_a337@100.75.171.40",
@@ -87,28 +86,28 @@ _CANDIDATES = {
 }
 
 
-# Module-level cache shared across AppResolver instances. Found live under
-# concurrent load: router.py builds a fresh AppResolver() and calls
-# resolve() on EVERY "open <app>" request, and with adb disabled that means
-# a live SSH round-trip listing 600+ packages every single time (~10-17s
-# observed) -- easily the single biggest contributor to requests timing out
-# the concurrency gate under any real burst. Installed apps change rarely
-# (a real install/uninstall, not something that happens minute to minute),
-# so cache a successful resolve for a good while -- an hour, not five
-# minutes; there's no push signal for "an app just got installed" so this
-# is a plain TTL, but there's no reason to pay the round-trip cost anywhere
-# near that often for something that changes this infrequently. Failures
-# are never cached -- a transient SSH/adb hiccup should retry fresh next
-# call, not lock in a false negative for the TTL.
+# Module-level cache shared across AppResolver instances. router.py builds a
+# fresh AppResolver() and calls resolve() on EVERY "open <app>" request, and
+# with adb disabled that means a live SSH round-trip listing 600+ packages
+# every single time -- 10 to 17 seconds observed, easily the single biggest
+# contributor to requests timing out the concurrency gate under any real
+# burst. Installed apps change rarely (a real install/uninstall, not
+# something that happens minute to minute), so a successful resolve gets
+# cached for a good while -- an hour, not five minutes. There's no push
+# signal for "an app just got installed," so this is a plain TTL, but
+# there's no reason to pay the round-trip cost anywhere near that often for
+# something that changes this infrequently. Failures are never cached -- a
+# transient SSH/adb hiccup should retry fresh next call, not lock in a
+# false negative for the whole TTL window.
 #
 # The lock is held across the ENTIRE fetch on a cache miss, not just the
-# read/write -- otherwise N concurrent requests that all see a stale cache
-# each kick off their own redundant ~10-17s round-trip (a thundering herd,
-# found while reviewing this after a burst test). Holding it means the
-# first caller does the one real fetch; everyone else blocks on the lock
-# and finds a warm cache the instant they acquire it, at the cost of only
-# ever running one resolve at a time -- an easy trade since the whole point
-# is that this should rarely run at all.
+# read/write. Without that, N concurrent requests that all see a stale
+# cache each kick off their own redundant 10-17s round-trip -- a burst
+# test made this obvious immediately. Holding the lock means the first
+# caller does the one real fetch and everyone else just waits and finds a
+# warm cache the instant they get it -- costs only running one resolve at a
+# time, which is fine since the whole point is that this should rarely run
+# at all.
 _cache_lock = threading.Lock()
 _cache = {"resolved": None, "installed": None, "ts": 0.0}
 _CACHE_TTL_S = 3600
@@ -121,11 +120,11 @@ class AppResolver:
         self._installed: set[str] = set()
         # False whenever the device query itself failed (adb unreachable, no
         # device attached, timeout) -- distinct from "queried fine, app just
-        # isn't in the list". Found live: a dropped wireless-adb connection
-        # made every "open <app>" request come back "Couldn't find X
-        # installed" for an app that WAS installed, with zero indication the
-        # check never actually ran. Callers must check this before treating
-        # an empty resolve() as a real negative.
+        # isn't in the list". A dropped wireless-adb connection used to make
+        # every "open <app>" request come back "Couldn't find X installed"
+        # for an app that WAS installed, with zero indication the check
+        # never actually ran. Callers must check this before treating an
+        # empty resolve() as a real negative.
         self.query_ok = False
 
     def resolve(self) -> dict[str, str]:

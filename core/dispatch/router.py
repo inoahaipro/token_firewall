@@ -129,8 +129,8 @@ def _extract_action(text: str) -> Optional[dict]:
                     break
     return None
 
-# Real code-level guardrail against destructive shell commands. Found live:
-# nothing in the hands-execution path checked for this at all -- safety
+# Real code-level guardrail against destructive shell commands. Nothing in
+# the hands-execution path checked for this at all before -- safety
 # depended entirely on the calling LLM choosing not to produce a destructive
 # action, with zero backstop if it did. This runs regardless of what
 # produced the command (LLM, cache replay, or a future caller), so a bad
@@ -209,14 +209,14 @@ _ACTION_META_KEYS = {"type", "description", "params", "steps"}
 def _normalize_action(action):
     """LLM output for an action is inconsistent about whether payload
     fields (message, text, cmd, title, content, etc) live nested under
-    "params" (the documented schema) or flat at the root. Found live: a
-    flat {"type":"toast","message":"X"} fired a REAL blank toast, because
-    every hands.execute() only ever reads action["params"]["message"] --
-    the root-level value was silently ignored, not an error, just empty
-    content sent to the device. Worse: the destructive-command guard reads
-    from the same params path, so a flat {"type":"run_command","cmd":"rm
-    -rf /"} would look like an empty, harmless command to it -- a genuine
-    guardrail bypass, not hypothetical, same root cause. Normalize once,
+    "params" (the documented schema) or flat at the root. A flat
+    {"type":"toast","message":"X"} fired a REAL blank toast, because every
+    hands.execute() only ever reads action["params"]["message"] -- the
+    root-level value was silently ignored, not an error, just empty content
+    sent to the device. Worse: the destructive-command guard reads from the
+    same params path, so a flat {"type":"run_command","cmd":"rm -rf /"}
+    would look like an empty, harmless command to it -- a genuine guardrail
+    bypass, not a hypothetical one, same root cause. Normalize once,
     centrally, so every consumer sees one consistent shape regardless of
     which way the LLM happened to format it that time."""
     if not isinstance(action, dict):
@@ -329,15 +329,15 @@ class FirewallRouter:
     def route(self, prompt: str, history: list = None) -> Response:
         self._bump(requests=1)
         # history is threaded through as an explicit parameter, not stored as
-        # self._history. Found live under concurrency testing: this router is
-        # a single shared instance across all requests, and self._history was
-        # a plain attribute set at the top of route() then read again later
-        # in the same call -- if two requests ever genuinely interleave
-        # (multi-worker deployment, or converting these routes to sync def so
-        # Starlette's threadpool kicks in), request B's history would
+        # self._history. This router is a single shared instance across all
+        # requests, and self._history as a plain attribute set at the top of
+        # route() and read again later in the same call is exactly the kind
+        # of thing that looks fine until two requests genuinely interleave
+        # (multi-worker deployment, or converting these routes to sync def
+        # so Starlette's threadpool kicks in) -- request B's history would
         # silently stomp request A's mid-flight, sending the wrong
-        # conversation history to the LLM. Currently masked only because this
-        # server happens to fully serialize requests today.
+        # conversation history to the LLM. Only masked right now because
+        # this server happens to fully serialize requests today.
         history = history or []
         intent = self.engine.process(prompt)
         if intent.kind == CHAIN and intent.sub_intents:

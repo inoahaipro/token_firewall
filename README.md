@@ -134,6 +134,56 @@ FirewallRouter
 3. Add detection in `core/config.py` `_detect_platform()`
 4. Add loader in `server.py` `_load_hands()`
 
+## Bugs I hit
+
+Found by actually attacking the thing -- fresh Claude instances using it
+blind, plus a live concurrency test that crammed a couple days of realistic
+traffic into a few minutes. Code review alone wouldn't have caught most of
+this.
+
+**Wrong handler kept winning.** `CompositeHands` checks `DesktopHands` before
+`RishPhoneHands`. Fine most of the time, except three different actions
+(clipboard, opening an app, screenshot) all had the same failure: Desktop
+claimed the action first even when it couldn't actually do it right. Reading
+the clipboard silently grabbed the *PC's* clipboard instead of the phone's.
+Screenshot was advertised in Desktop's capabilities list with no code behind
+it at all, so it just ate the request and returned an error, and the phone's
+handler (which works fine) never got a shot. Same bug, three places. Fixed by
+not claiming capabilities you don't have, and checking the actual shape of
+what's being opened (an Android package id doesn't look like a Windows/Linux
+binary name) instead of trusting the action's label.
+
+**Lying instead of saying "I don't know."** Wireless ADB dropped mid-session
+and every "open Spotify" started coming back "couldn't find it installed" --
+for an app that was very much on the phone. The code had no way to tell
+"checked, it's not there" apart from "couldn't check at all." Same exact
+mistake was sitting in the health endpoint: `"device" in output` reads as
+true even when zero devices are connected, because `adb devices`' own header
+text contains the word "device." Both got the same fix -- track whether the
+query itself worked, not just what it returned.
+
+**Typo-correction ate real words.** Fuzzy-matching against a fixed keyword
+list to fix typed typos also ran on app names, so "spotify" silently became
+"notify" (0.77 similarity, above the cutoff), "chrome" became "home," "clock"
+became "lock." The command itself would still "succeed" -- just against the
+wrong target, no error anywhere. Fixed by leaving the target of an
+open/launch command alone; the resolver downstream already does its own
+matching on the raw name.
+
+**Shared SQLite connection, zero locking.** `check_same_thread=False` turns
+off Python's *safety check* for using one connection across threads. It does
+not make the connection thread-safe. Under real concurrent load this crashed
+outright with `sqlite3.ProgrammingError`. Took one load test to find, one
+lock around every DB call to fix, and it hasn't come back since.
+
+**Every request redid the same slow work.** Resolving an app name meant a
+live ~10-17s round trip to list every installed package -- on every single
+open-app request, even back-to-back ones for the same app. Worse under
+concurrency: N requests hitting a cold cache meant N separate slow round
+trips instead of one. Holding the lock across the whole fetch, not just the
+read and the write, fixed both at once -- one request pays the cost, the rest
+just wait on the lock and find a warm cache.
+
 ## Codex automation tips
 
 Use `/v1/ui-find` for intelligent element finding without a vision model:

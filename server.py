@@ -108,14 +108,13 @@ app = FastAPI(title="Token Firewall", version="3.0", docs_url=None, redoc_url=No
 # router.route() is fully synchronous blocking I/O (SQLite, subprocess SSH
 # calls, LLM HTTP requests) called from an async route with no thread
 # offload, so it fully blocks the single event loop for the whole call --
-# every request already serializes in practice. Found live under stress
-# testing: a burst of concurrent requests queued up unbounded, 40% of a
-# 10-request burst silently timed out client-side (each request waiting
-# behind however many arrived before it), and the process was SIGKILLed
-# once during the test window. This doesn't add real parallelism (that
-# would need a bigger async/threading rework) -- it caps how many requests
-# get admitted to the queue at all, so excess load gets a fast, honest 503
-# instead of hanging past the caller's own timeout with no explanation.
+# every request already serializes in practice. Stress-tested a burst of 10
+# concurrent requests and 40% silently timed out client-side, each one
+# stuck waiting behind whatever arrived first, and the process got SIGKILLed
+# once during that run. This doesn't add real parallelism (that needs a
+# bigger async/threading rework) -- it just caps how many requests get
+# admitted to the queue, so excess load gets a fast, honest 503 instead of
+# hanging past the caller's own timeout with no explanation.
 _REQUEST_GATE = asyncio.Semaphore(3)
 _GATE_WAIT_S = 5
 
@@ -319,9 +318,9 @@ async def completions(request: Request):
         # Calling it directly here blocks the WHOLE event loop for the
         # entire request, which meant no other coroutine -- including the
         # request-gate's own timeout timer above -- could run until it
-        # finished. Found live: that's why the gate did nothing under real
-        # concurrent load; the event loop was too wedged to ever notice a
-        # timeout. to_thread() actually frees the loop to stay responsive.
+        # finished. That's exactly why the gate wasn't doing anything under
+        # real concurrent load: the event loop was too wedged to notice a
+        # timeout had even happened. to_thread() actually frees it up.
         result = await asyncio.to_thread(router.route, prompt, history)
     except Exception as e:
         traceback.print_exc()
@@ -382,11 +381,10 @@ async def tool_execute(request: Request):
     # Route through the router's _exec_hands, not hands.execute() directly --
     # calling hands directly here completely bypassed the destructive-command
     # guardrail and the TF_DISABLE_ACTIONS check, both of which only live in
-    # _exec_hands. Found live during a security review: this endpoint is
-    # explicitly documented as "for MCP tool calls and OpenClaw agent use",
-    # i.e. exactly the path an AI assistant's tool layer would hit, so
-    # bypassing the guard here defeated it entirely regardless of what got
-    # fixed in the router.
+    # _exec_hands. This endpoint is explicitly documented as "for MCP tool
+    # calls and OpenClaw agent use" -- exactly the path an AI assistant's
+    # tool layer would hit -- so skipping the guard here defeated it
+    # entirely, no matter what got fixed in the router itself.
     result = router._exec_hands(action)
     return {"success": result.source not in ("hands_error", "blocked"), "output": result.content, "source": result.source}
 
@@ -470,10 +468,10 @@ async def export_pack(request: Request):
     min_hits = int(body.get("min_hits", 5))
     # The requested output path is unvalidated user input -- constrain it to
     # stay inside packs/, resolving any ../ traversal or absolute-path
-    # attempt first. Found live during a security review: this was an
-    # arbitrary-file-write primitive (any path, parent dirs auto-created,
-    # content is DB-derived JSON but the DESTINATION was fully attacker-
-    # controlled -- e.g. could target ~/.ssh/authorized_keys).
+    # attempt first. Without this it's an arbitrary-file-write primitive:
+    # parent dirs get auto-created, content is DB-derived JSON, but the
+    # DESTINATION was fully attacker-controlled -- could've targeted
+    # ~/.ssh/authorized_keys just as easily as packs/.
     packs_base = (Path(__file__).resolve().parent / "packs").resolve()
     requested = body.get("output", f"{cfg.PLATFORM}/exported.json")
     output = (packs_base / requested).resolve()

@@ -113,12 +113,12 @@ class RishPhoneHands:
                 return ActionResult(r.returncode == 0, "notification sent" if r.returncode == 0 else "", r.stderr.strip())
             if atype == "vibrate":
                 # `cmd vibrator vibrate` over rish/Shizuku hits "Can't find
-                # service: vibrator" -- that binder-level service isn't
+                # service: vibrator" -- that binder-level service just isn't
                 # reachable from Shizuku's restricted context on this device.
-                # termux-vibrate is a real Termux:API command that doesn't
-                # need rish at all -- confirmed working directly over SSH.
-                # Found live: this action was advertised as supported but
-                # always failed.
+                # This action was advertised as supported but always failed
+                # until switching to termux-vibrate, a real Termux:API
+                # command that doesn't need rish at all -- works fine
+                # straight over SSH.
                 dur = int(p.get("duration_ms", 500))
                 r = subprocess.run(SSH_PHONE_CMD + [f"termux-vibrate -d {dur}"],
                                     capture_output=True, text=True, timeout=15)
@@ -158,11 +158,10 @@ class RishPhoneHands:
                 r = self._rish(f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
                 # `monkey` (via rish) dumps its own noisy arg-parsing debug
                 # preamble ("bash arg: -p\nbash arg: com.spotify.music...")
-                # ahead of the real result -- that was leaking straight
+                # ahead of the real result, and that was leaking straight
                 # through as the action's output instead of a clean
-                # confirmation, inconsistent with every other action here
-                # that formats its own result. Found live via independent
-                # testing on another instance.
+                # confirmation -- every other action here formats its own
+                # result, this one just hadn't been caught yet.
                 if r.success:
                     r.output = "Done -- app opened."
                 return r
