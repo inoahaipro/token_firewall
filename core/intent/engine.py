@@ -103,6 +103,89 @@ _LLM_KW = [
     "give me", "show me", "find me", "list", "describe",
 ]
 
+# A device keyword appearing ANYWHERE in the text used to be sufficient for
+# kind=DEVICE, no matter how it's used grammatically. "screen" is a real
+# device keyword; "my screen is cracked" and "battery died" are statements
+# about a device, not commands to one, and matched anyway. Real commands
+# are imperative: check/turn/send/open/take, no subject, present tense.
+# Narrated statements have a subject and a descriptive/past-tense verb the
+# device vocabulary doesn't cover ("died", "cracked", "broke", "froze",
+# "left", "sucks"). Requiring one of these action verbs is the actual
+# distinguishing signal -- not message length (that was a symptom-level
+# patch for one manifestation of this, kept as defense in depth below, not
+# a substitute for this).
+_ACTION_VERBS = {
+    "check", "get", "show", "tell", "whats", "what's",
+    "turn", "enable", "disable", "toggle", "set", "change", "adjust",
+    "send", "notify", "alert", "toast",
+    "open", "launch", "start", "close", "stop", "kill", "quit", "exit",
+    "take", "grab", "tap", "click", "press", "swipe", "scroll", "type",
+    "run", "execute", "vibrate", "connect", "disconnect",
+    "lock", "unlock", "mute", "unmute", "dim", "brighten",
+    "raise", "lower", "increase", "decrease",
+    "restart", "reboot", "shutdown", "find", "search", "go",
+}
+
+# Bare topic/status queries have no verb at all ("battery", "wifi status",
+# "battery?") and are legitimate short-circuits around the action-verb
+# requirement above -- but ONLY if literally every word in the message is
+# either device vocabulary or one of these query/filler words. One
+# unrecognized word (a real verb, an adjective, a place, anything outside
+# this small closed set) means there's actual sentence content the fast
+# path can't safely interpret, and it should fall through to a real LLM
+# call instead of guessing. "battery died": "died" isn't in this set, so
+# it correctly requires an action verb (has none) and isn't classified as
+# a command.
+_SAFE_QUERY_FILLER = {
+    "my", "is", "on", "off", "the", "a", "an", "please", "pls", "plz",
+    "whats", "what's", "am", "i", "do", "have", "many", "connected",
+    "status", "level", "percentage", "charge", "charging", "info",
+    "at", "of", "to", "in", "for", "how", "much", "current", "right", "now",
+    "it", "this", "that",
+}
+_WORD_RE = re.compile(r"[a-z']+")
+
+# Leading politeness/filler stripped before looking for the verb -- "please
+# check my battery" and "can you turn on wifi" both put the real verb after
+# a couple of throwaway words, not literally at position 0.
+_LEADING_FILLER = {"please", "hey", "yo", "so", "can", "could", "would", "you", "just", "now"}
+
+
+def _looks_like_command(raw_text: str, norm: str) -> bool:
+    # Typo-tolerant action-verb match, but ONLY against the leading word(s)
+    # of the RAW (pre-typo-correction) message, not a scan of the whole
+    # thing. Found live: "wifi at the coffee shop sucks" -- pure narrative,
+    # zero command intent -- got "shop" typo-corrected to "stop" (0.75
+    # similarity, exact same collision class as spotify~notify) and "stop"
+    # is a real action verb, manufacturing a false command signal. Turns
+    # out there's no similarity cutoff that separates "sned"~"send" from
+    # "shop"~"stop" -- both score exactly 0.75, identical. The signal that
+    # actually works is position: real commands are imperative, verb first
+    # ("check battery", "turn on wifi"); "shop" sits mid-sentence in a
+    # narrative, "sned"/"chek"/"tunr" sit at the very front of a command.
+    # Restricting the fuzzy match to leading words only keeps real typo
+    # tolerance ("chek my batery" still works) while a decoy word buried
+    # later in a sentence never gets the chance to match at all.
+    raw_words = _WORD_RE.findall(raw_text.lower())
+    lead = [w for w in raw_words if w not in _LEADING_FILLER][:2]
+    for w in lead:
+        if w in _ACTION_VERBS:
+            return True
+        if len(w) >= 4 and difflib.get_close_matches(w, _ACTION_VERBS, n=1, cutoff=0.75):
+            return True
+    # Bare-query fallback (no verb needed, e.g. "battery", "wifi status")
+    # DOES use the corrected `norm` -- typo tolerance on the device NOUN
+    # itself ("wifii status" -> "wifi status") is legitimate and safe here,
+    # since this branch already requires every remaining word to be
+    # recognized vocabulary, not just a loose similarity match.
+    words = set(_WORD_RE.findall(norm))
+    device_vocab_words = set()
+    for _lst in _DEVICE_KW.values():
+        for _kw in _lst:
+            device_vocab_words.update(_kw.split())
+    allowed = device_vocab_words | _SAFE_QUERY_FILLER
+    return not (words - allowed)
+
 _CHAIN_SPLITTER = re.compile(
     r"\b(then|and then|after that|followed by|next|finally|also)\b",
     re.IGNORECASE,
@@ -308,7 +391,7 @@ class IntentEngine:
         # never classify as DEVICE at all when TF runs on the PC.
         device_keys = _DEVICE_KW.get("mobile", []) + _DEVICE_KW.get("desktop", []) + _DEVICE_KW.get("shared", [])
 
-        if not skip_device_kw and any(kw in norm for kw in device_keys):
+        if not skip_device_kw and any(kw in norm for kw in device_keys) and _looks_like_command(text, norm):
             canonical_fp = _canonical_content_fp(norm, self.platform) or _canonical_status_fp(norm, self.platform)
             return Intent(raw=text, normalized=norm, kind=DEVICE,
                           fingerprint=canonical_fp or fp, platform=self.platform,
